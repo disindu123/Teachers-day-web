@@ -3,10 +3,22 @@ import assert from 'node:assert/strict';
 import { createApp } from '../lib/app.js';
 import { loadConfig } from '../lib/config.js';
 import { HttpError } from '../lib/errors.js';
+import { ownerKey } from '../lib/photos.js';
 
 // Test doubles are injected only here; the application has no demo admin or bypass.
 const state = { messages: [], gallery: [], slider: [], count: 0, revokedChecked: false };
 const services = {
+  photos: {
+    signUpload(collection, uid) {
+      return {
+        collection,
+        uid,
+        params: {
+          public_id: `scmu/${collection}/${ownerKey(uid)}/00000000-0000-4000-8000-000000000000`,
+        },
+      };
+    },
+  },
   auth: {
     async verifyIdToken(token, checkRevoked) {
       state.revokedChecked = checkRevoked;
@@ -66,6 +78,7 @@ before(async () => {
   const config = loadConfig({
     RATE_LIMIT_SALT: 'test-only-secret',
     FB_PRIVATE_KEY: 'private-test-value',
+    CLOUDINARY_API_SECRET: 'cloudinary-private-test-value',
   });
   server = createApp({ config, getServices: () => services }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -93,6 +106,7 @@ test('client configuration never exposes Admin secrets', async () => {
   assert.equal(result.status, 200);
   assert.ok(!JSON.stringify(result.body).includes('private-test-value'));
   assert.ok(!JSON.stringify(result.body).includes('test-only-secret'));
+  assert.ok(!JSON.stringify(result.body).includes('cloudinary-private-test-value'));
 });
 test('missing and invalid tokens cannot read feedback', async () => {
   assert.equal((await request('/api/messages')).status, 401);
@@ -108,6 +122,7 @@ test('an authenticated non-admin cannot access any admin management route', asyn
     ['/api/slider/x', 'DELETE'],
     ['/api/slider/x', 'PATCH'],
     ['/api/admin/stats', 'GET'],
+    ['/api/uploads/sign', 'POST'],
   ])
     assert.equal(
       (
@@ -162,19 +177,19 @@ test('feedback rate-limit errors propagate correctly', async () => {
   assert.equal(result.status, 429);
   state.count = 0;
 });
-test('gallery upload must belong to the authenticated admin and contain an accepted extension', async () => {
+test('gallery upload must belong to the authenticated admin and collection', async () => {
   const file = '00000000-0000-4000-8000-000000000000';
-  for (const storagePath of [
-    `gallery/other/${file}.jpg`,
-    `gallery/adminuid/${file}.svg`,
-    `gallery/adminuid/../../private.jpg`,
+  for (const publicId of [
+    `scmu/gallery/${ownerKey('other')}/${file}`,
+    `scmu/slider/${ownerKey('adminuid')}/${file}`,
+    `scmu/gallery/${ownerKey('adminuid')}/../../private`,
   ])
     assert.equal(
       (
         await request('/api/gallery', {
           method: 'POST',
           token: 'admin-token',
-          body: { storagePath },
+          body: { publicId },
         })
       ).status,
       400,
@@ -185,7 +200,7 @@ test('admin can register an uploaded gallery image and later delete it', async (
     method: 'POST',
     token: 'admin-token',
     body: {
-      storagePath: 'gallery/adminuid/00000000-0000-4000-8000-000000000000.jpg',
+      publicId: `scmu/gallery/${ownerKey('adminuid')}/00000000-0000-4000-8000-000000000000`,
       caption: 'Thank you, teachers',
     },
   });
@@ -267,4 +282,40 @@ test('unconfigured Firebase cannot silently accept or lose messages', async () =
   } finally {
     await new Promise((r) => unavailable.close(r));
   }
+});
+
+test('upload signing requires an admin and a bounded collection', async () => {
+  assert.equal(
+    (await request('/api/uploads/sign', { method: 'POST', body: { collection: 'gallery' } }))
+      .status,
+    401,
+  );
+  assert.equal(
+    (
+      await request('/api/uploads/sign', {
+        method: 'POST',
+        token: 'admin-token',
+        body: { collection: '../private' },
+      })
+    ).status,
+    400,
+  );
+  const result = await request('/api/uploads/sign', {
+    method: 'POST',
+    token: 'admin-token',
+    body: { collection: 'gallery' },
+  });
+  assert.equal(result.status, 200);
+  assert.ok(result.body.params.public_id.startsWith(`scmu/gallery/${ownerKey('adminuid')}/`));
+});
+test('Firebase Web configuration works without a Storage bucket', () => {
+  const config = loadConfig({
+    FB_PROJECT_ID: 'school-event',
+    FB_WEB_API_KEY: 'web-key',
+    FB_WEB_AUTH_DOMAIN: 'school-event.firebaseapp.com',
+    FB_WEB_APP_ID: 'app-id',
+  });
+  assert.equal(config.configured, true);
+  assert.equal(config.public.uploadsConfigured, false);
+  assert.equal(config.firebase.storageBucket, undefined);
 });

@@ -2,7 +2,7 @@
 
 Teacher's Day celebration website for **Sri Sanghabodhi National College, Nittambuwa**, presented by **SCMU — Media Unit of Sanghabodhi College**.
 
-**Stack:** Node.js/Express, Firebase Admin SDK, Firestore, Firebase Storage, Firebase Email/Password Authentication, HTML, CSS, and vanilla JavaScript.
+**Stack:** Node.js/Express, Firebase Admin SDK, Firestore, Cloudinary images, Firebase Email/Password Authentication, HTML, CSS, and vanilla JavaScript.
 
 ## Features
 
@@ -14,7 +14,7 @@ Teacher's Day celebration website for **Sri Sanghabodhi National College, Nittam
 - Admin Email/Password login at **`/login/index.html`**, dashboard at **`/admin/index.html`**.
 - Private feedback viewing/deletion; gallery upload/deletion; slider uploads, HTTPS URLs, deletion, and ordering.
 - Firebase ID token verification with revocation checks **and an `admin: true` custom claim** on every admin API.
-- Direct-to-Storage uploads, image signature/type/size validation, upload progress, retryable registration, origin checks, CSP, and transaction-backed feedback rate limits.
+- Direct-to-Cloudinary signed uploads, verified image format/size validation, upload progress, retryable registration, origin checks, CSP, and transaction-backed feedback rate limits.
 - Firebase Hosting/Cloud Functions and Vercel configuration, a Heroku Procfile, and automated security/API tests.
 
 ## Assumptions and launch status
@@ -29,21 +29,29 @@ Teacher's Day celebration website for **Sri Sanghabodhi National College, Nittam
 ## 1. Requirements
 
 - **Node.js 22 or later**, npm, and a Firebase project you control.
-- Firebase's **Blaze pay-as-you-go plan** for Storage. This is a current requirement for existing and new default buckets. Configure a billing budget/alert. [Official Storage requirements](https://firebase.google.com/docs/storage/faqs-storage-changes-announced-sept-2024).
+- A [Cloudinary Image and Video APIs Free account](https://cloudinary.com/pricing), with its cloud name, API key, and API secret. The free plan has a shared credit allowance for storage, delivery, and processing; it is not unlimited. Firebase Storage is not used.
+- To avoid Firebase billing, run Express on an external Node host. The optional Firebase Cloud Functions deployment still requires Blaze.
 
 ## 2. Create the Firebase project
 
 1. Open [Firebase Console](https://console.firebase.google.com/) → **Add project**. Analytics is optional.
-2. **Project settings → General → Add Web app**. Copy `apiKey`, `authDomain`, `projectId`, `storageBucket`, `appId`, and `messagingSenderId`.
+2. **Project settings → General → Add Web app**. Copy `apiKey`, `authDomain`, `projectId`, `appId`, and `messagingSenderId`.
 3. **Build → Firestore Database**: create the **default database**, Standard edition/native mode, in production mode and a suitable region. Collections are created automatically when the server first writes.
-4. **Build → Storage**: create the default bucket and copy its **exact name**, including `.firebasestorage.app` or `.appspot.com`. Do not add `gs://`.
+4. No Firebase Storage bucket is needed. Photos are stored in your Cloudinary account.
 5. **Authentication → Sign-in method**: enable **Email/Password**. Email-link/passwordless sign-in can remain disabled.
 6. **Authentication → Users**: add your administrator's Gmail address and a dedicated Firebase password.
 7. **Authentication → Settings → Authorized domains**: add `localhost` for development and your hosting/custom hostnames.
 8. **Project settings → Service accounts**: generate a private key for local development/an external Node host. Keep the JSON outside `public/` and out of Git.
-9. The runtime identity needs Firestore and Storage access and Firebase Auth user-read permission for revocation checks. The trusted role-assignment script additionally needs Firebase Authentication admin permission. Cloud Functions can use its attached service account.
+9. The runtime identity needs Firestore access and Firebase Auth user-read permission for revocation checks. The trusted role-assignment script additionally needs Firebase Authentication admin permission. Cloud Functions can use its attached service account.
 
-## 3. Local setup
+## 3. Connect Cloudinary and run locally
+
+1. Sign in to [Cloudinary](https://console.cloudinary.com/) and choose the **Image and Video APIs Free** plan.
+2. Open the product environment's **API Keys** page. Your supplied cloud name is `jxkhgqjq` and API key is `215673733495831`.
+3. Copy the matching **API secret** into your local `.env` or hosting environment manager. The sample code's `<your_api_secret>` is a placeholder; it cannot authenticate uploads.
+4. Keep the real secret out of `public/`, source files, GitHub, and chat. No unsigned upload preset is needed; Express issues signed upload parameters only to verified Firebase administrators.
+
+Local setup:
 
 ```bash
 git clone https://github.com/disindu123/Teachers-day-web.git
@@ -59,12 +67,12 @@ Edit `.env`. The `FB_` prefix is intentional: Cloud Functions reserves variables
 | Variable                                                                              | Value                                                                            |
 | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `FB_PROJECT_ID`                                                                       | Firebase project ID                                                              |
-| `FB_STORAGE_BUCKET`                                                                   | Exact Storage bucket name                                                        |
 | `FB_CLIENT_EMAIL`, `FB_PRIVATE_KEY`                                                   | Service-account values; **server only**                                          |
 | `FB_SERVICE_ACCOUNT_JSON`                                                             | Alternative: complete compact service-account JSON in one server secret          |
 | `GOOGLE_APPLICATION_CREDENTIALS`                                                      | Alternative: absolute path to a local service-account JSON                       |
 | `FB_USE_ADC`                                                                          | `true` for an attached Google Cloud service account                              |
 | `FB_WEB_API_KEY`, `FB_WEB_AUTH_DOMAIN`, `FB_WEB_APP_ID`, `FB_WEB_MESSAGING_SENDER_ID` | Public Web app config                                                            |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`                | Cloudinary account values; API secret is server-only                             |
 | `RATE_LIMIT_SALT`                                                                     | Random server-only secret, identical across instances                            |
 | `PUBLIC_SITE_URL`                                                                     | Canonical origin, e.g. `http://localhost:3000`; omit to infer the request origin |
 | `TRUST_PROXY`                                                                         | `0` locally; `1` behind a trusted single-hop host ingress                        |
@@ -102,7 +110,7 @@ Open **http://localhost:3000** and **http://localhost:3000/login/index.html**.
 
 `npm ci` builds the Firebase browser bundle automatically. Use `npm run build` after changing `client/firebase.js`; `npm run dev` watches the server.
 
-## 4. Deploy the security rules
+## 4. Deploy the Firestore security rules
 
 Install the [Firebase CLI](https://firebase.google.com/docs/cli), sign in, associate your project, and deploy:
 
@@ -110,13 +118,14 @@ Install the [Firebase CLI](https://firebase.google.com/docs/cli), sign in, assoc
 npm install -g firebase-tools
 firebase login
 firebase use --add
-firebase deploy --only firestore:rules,firestore:indexes,storage
+firebase deploy --only firestore:rules,firestore:indexes
 ```
 
 - **Firestore rules deny browser access.** Express mediates all reads/writes with its Admin SDK, keeping feedback private and enforcing validation.
-- **Storage permits public photo reads and admin-only uploads/deletions** in `gallery/{uid}/{file}` and `slider/{uid}/{file}`. Creation requires the admin's own UID, an accepted image MIME type, and a maximum 10 MB. Objects are immutable.
-- Express checks upload ownership, bucket metadata, size, MIME type, and initial image bytes before registration.
-- Only the requested gallery/slider fields are stored. Deletion derives the uploaded object path from its Firebase download URL and removes the binary before metadata.
+- Photos upload directly to Cloudinary's image endpoint. Only verified administrators can obtain a signature from `POST /api/uploads/sign`; signed public IDs are scoped to a hash of their UID and the selected gallery/slider collection.
+- Signed parameters restrict accepted formats and prevent overwrite. Before saving metadata, Express retrieves the actual asset from Cloudinary and validates its public ID, image resource/type, format, version, and 10 MB size limit. Invalid managed uploads are deleted.
+- Only the requested gallery/slider fields are stored. Deleting an uploaded item removes its managed Cloudinary asset before Firestore metadata; failures retain the record for retry. Removing an external URL slide only removes metadata.
+- Older Firebase Storage URLs are left readable as external URLs, but this app no longer uploads to or deletes from Firebase Storage. Replace any existing Firebase-hosted photos before disabling its bucket.
 - Optionally enable **Firestore TTL on `_rateLimits.expiresAt`** to clean expired limiter records. The application already respects their expiry.
 
 ## 5. Branding and content
@@ -125,31 +134,32 @@ firebase deploy --only firestore:rules,firestore:indexes,storage
 - Set confirmed official social URLs and an optional confirmed `EVENT_DATE`.
 - Use the dashboard **Gallery** tab to upload approved photographs and optional captions.
 - Use **Image slider** to upload photos or paste publicly accessible HTTPS image URLs. Lower order numbers appear first. Delete unwanted slides with the trash control.
-- The homepage falls back to six illustrative bundled slides when Firestore's slider is empty. Optionally run **`npm run seed:slider`** once against an empty slider to copy those images into Firebase Storage/Firestore. Replace them with event photography when ready.
+- The homepage falls back to six illustrative bundled slides when Firestore's slider is empty. Optionally run **`npm run seed:slider`** once against an empty slider to copy those images into Cloudinary/Firestore. Replace them with event photography when ready.
 - An unconfigured gallery shows a labelled illustrative preview. A configured empty gallery shows a genuine empty album state.
 
-Files upload **directly from the authenticated browser to Firebase Storage**, followed by a small JSON registration request to Express. This avoids Node host/serverless body-size limits. If registration fails after an upload, the dashboard retains its path for a safe retry.
+Files upload **directly from the authenticated browser to Cloudinary**, followed by a small JSON registration request to Express. This avoids Node host/serverless body-size limits. If registration fails after an upload, the dashboard retains its public ID for a safe retry.
 
 ## 6. API
 
 Writes use `Content-Type: application/json`. Admin endpoints require `Authorization: Bearer <Firebase ID token>` and the `admin: true` claim.
 
-| Endpoint                                | Access | Request / response                                    |
-| --------------------------------------- | ------ | ----------------------------------------------------- |
-| `GET /api/config`                       | Public | Allowlisted public config; no Admin secrets           |
-| `GET /api/health`                       | Public | Process status and Web config readiness               |
-| `POST /api/messages`                    | Public | `{ name, message }`; `201` after commit               |
-| `GET /api/messages?limit=30&cursor=...` | Admin  | `{ items, nextCursor }`, newest first                 |
-| `DELETE /api/messages/:id`              | Admin  | `204` after deletion                                  |
-| `GET /api/gallery?limit=24&cursor=...`  | Public | `{ items, nextCursor }`, newest first                 |
-| `POST /api/gallery`                     | Admin  | `{ storagePath, caption? }`                           |
-| `DELETE /api/gallery/:id`               | Admin  | Deletes binary and metadata                           |
-| `GET /api/slider`                       | Public | `{ items }` by order/document ID                      |
-| `POST /api/slider`                      | Admin  | `{ storagePath, order }` **or** `{ imageUrl, order }` |
-| `PATCH /api/slider/:id`                 | Admin  | `{ order }`; `204`                                    |
-| `DELETE /api/slider/:id`                | Admin  | Deletes metadata and uploaded binary                  |
-| `GET /api/admin/me`                     | Admin  | Verified UID/email                                    |
-| `GET /api/admin/stats`                  | Admin  | Firestore aggregation counts                          |
+| Endpoint                                | Access | Request / response                                                      |
+| --------------------------------------- | ------ | ----------------------------------------------------------------------- |
+| `GET /api/config`                       | Public | Allowlisted public config; no Admin secrets                             |
+| `GET /api/health`                       | Public | Process status and Web config readiness                                 |
+| `POST /api/messages`                    | Public | `{ name, message }`; `201` after commit                                 |
+| `GET /api/messages?limit=30&cursor=...` | Admin  | `{ items, nextCursor }`, newest first                                   |
+| `DELETE /api/messages/:id`              | Admin  | `204` after deletion                                                    |
+| `GET /api/gallery?limit=24&cursor=...`  | Public | `{ items, nextCursor }`, newest first                                   |
+| `POST /api/gallery`                     | Admin  | `{ publicId, caption? }`                                                |
+| `DELETE /api/gallery/:id`               | Admin  | Deletes binary and metadata                                             |
+| `GET /api/slider`                       | Public | `{ items }` by order/document ID                                        |
+| `POST /api/slider`                      | Admin  | `{ publicId, order }` **or** `{ imageUrl, order }`                      |
+| `PATCH /api/slider/:id`                 | Admin  | `{ order }`; `204`                                                      |
+| `DELETE /api/slider/:id`                | Admin  | Deletes metadata and uploaded binary                                    |
+| `POST /api/uploads/sign`                | Admin  | `{ collection: "gallery" or "slider" }`; fixed signed upload parameters |
+| `GET /api/admin/me`                     | Admin  | Verified UID/email                                                      |
+| `GET /api/admin/stats`                  | Admin  | Firestore aggregation counts                                            |
 
 **Limits:** Name 2–80 characters; Message 3–2,000; Caption 0–300; order integer 0–9,999; pagination 1–100 items. API timestamps are ISO strings; database timestamps are Firestore Timestamps. Submitted text is rendered with `textContent`.
 
@@ -172,9 +182,9 @@ Errors: `{ error: { code, message, requestId } }`. Unknown errors are logged wit
 
 1. Connect this repository to your host. Select **Node 22 or later**.
 2. Install/build with `npm ci`; start with `npm start`. The app binds the provider's `PORT` on all interfaces. A Heroku `Procfile` is included.
-3. Set `NODE_ENV=production`, Firebase Admin/Web settings, a random `RATE_LIMIT_SALT`, and public/social values using the host's environment manager. `FB_SERVICE_ACCOUNT_JSON` is convenient when multiline key handling is awkward.
+3. Set `NODE_ENV=production`, Firebase Admin/Web and Cloudinary settings, a random `RATE_LIMIT_SALT`, and public/social values using the host's environment manager. `FB_SERVICE_ACCOUNT_JSON` is convenient when multiline key handling is awkward.
 4. Set `PUBLIC_SITE_URL` to the HTTPS origin. Use `TRUST_PROXY=1` only behind the host's trusted ingress.
-5. Add the hostname to Firebase Auth, deploy the Firebase rules, and run the smoke check below.
+5. Add the hostname to Firebase Auth, deploy the Firestore rules, and run the smoke check below.
 
 Persistence is entirely in Firebase; no writable deployment disk is needed.
 
@@ -186,7 +196,7 @@ Vercel detects root **`server.js`**, which exports the Express app. `public/` is
 2. Use `npm ci` for install and `npm run build` for build if prompted; retain standard `public/` static handling.
 3. Add all environment values. Set `PUBLIC_SITE_URL` per deployment environment, or leave it blank to check the current origin on preview deployments.
 4. Set `TRUST_PROXY=1`, add the production/custom hostname to Firebase Auth, and deploy.
-5. Run the smoke check. Uploads still go directly to Firebase Storage; the API only receives JSON.
+5. Run the smoke check. Uploads still go directly to Cloudinary; the API only receives JSON.
 
 [Official Express on Vercel guide](https://vercel.com/docs/frameworks/backend/express).
 
@@ -200,11 +210,12 @@ Vercel detects root **`server.js`**, which exports the Express app. `public/` is
 ```dotenv
 FB_USE_ADC=true
 FB_PROJECT_ID=YOUR_PROJECT_ID
-FB_STORAGE_BUCKET=YOUR_EXACT_BUCKET
 FB_WEB_API_KEY=YOUR_WEB_API_KEY
 FB_WEB_AUTH_DOMAIN=YOUR_PROJECT_ID.firebaseapp.com
 FB_WEB_APP_ID=YOUR_WEB_APP_ID
 FB_WEB_MESSAGING_SENDER_ID=YOUR_SENDER_ID
+CLOUDINARY_CLOUD_NAME=jxkhgqjq
+CLOUDINARY_API_KEY=215673733495831
 PUBLIC_SITE_URL=https://YOUR_PROJECT_ID.web.app
 TRUST_PROXY=1
 SOCIAL_FACEBOOK=
@@ -213,24 +224,25 @@ SOCIAL_INSTAGRAM=
 SCHOOL_WEBSITE=https://srisanghabodhi.lk/
 ```
 
-3. Create the rate-limit Secret Manager secret and paste your random value when prompted:
+3. Create both server secrets and paste the appropriate value at each prompt:
 
 ```bash
 firebase functions:secrets:set RATE_LIMIT_SALT
+firebase functions:secrets:set CLOUDINARY_API_SECRET
 ```
 
-4. Ensure the runtime service account has Firestore/Storage access and Firebase Auth user-read permission. It uses Application Default Credentials, so no private Admin key is needed in the deployed function.
+4. Ensure the runtime service account has Firestore access and Firebase Auth user-read permission. It uses Application Default Credentials, so no private Admin key is needed in the deployed function.
 5. Deploy:
 
 ```bash
 npm ci
 firebase use YOUR_PROJECT_ID
-firebase deploy --only firestore,storage,functions,hosting
+firebase deploy --only firestore,functions,hosting
 ```
 
 6. Add the hostname to Firebase Auth and run the smoke check. Keep the canonical `web.app` origin consistent with `PUBLIC_SITE_URL`.
 
-The function is capped at 10 instances. Tune resources for expected traffic. Functions and Storage require an enabled billing account.
+The function is capped at 10 instances. Tune resources for expected traffic. Cloud Functions requires an enabled billing account. Cloudinary is billed separately according to its own plan.
 
 [Hosting/Functions guide](https://firebase.google.com/docs/hosting/functions) · [Environment/secrets guide](https://firebase.google.com/docs/functions/config-env).
 
@@ -242,46 +254,47 @@ npm run build
 npm audit --omit=dev
 ```
 
-Automated tests exercise actual HTTP routes with **injected test doubles**. They cover auth/role/revocation checks, Unicode/markup handling, validation, upload ownership, unsafe URLs, order editing/deletion, and Storage signatures. They do not contact your live Firebase project.
+Automated tests exercise actual HTTP routes with **injected test doubles**. They cover auth/role/revocation checks, Unicode/markup handling, validation, Cloudinary upload ownership, unsafe URLs, order editing/deletion, and Cloudinary metadata checks. They do not contact your live Firebase or Cloudinary accounts.
 
-After configuring Firebase:
+After configuring Firebase and Cloudinary:
 
 1. Submit feedback; confirm success and the document in `messages`.
 2. Sign in as the assigned admin; view its Sri Lanka timestamp and delete it.
-3. Upload a gallery photo; check Storage, Firestore, public grid, and lightbox. Delete it and verify both locations.
+3. Upload a gallery photo; check Cloudinary, Firestore, public grid, and lightbox. Delete it and verify both locations.
 4. Add uploaded and URL slider images, reorder them, check the homepage, and remove them.
 5. Log out; verify `401` on admin APIs. An ordinary authenticated user must receive `403`.
 6. Check narrow screens, keyboard navigation, and the live browser console.
 
 ### Troubleshooting
 
-| Symptom                            | Fix                                                                  |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| Login is being configured          | Fill Web config/project/bucket settings, then restart/redeploy       |
-| `ADMIN_REQUIRED`                   | Grant admin claim, then sign out/in                                  |
-| `FIREBASE_NOT_CONFIGURED`          | Check credentials, project/bucket, and random salt                   |
-| Storage unauthorized               | Deploy rules, refresh admin session, check bucket name               |
-| Firestore/Storage permission error | Check runtime service-account IAM roles/project                      |
-| `ORIGIN_DENIED`                    | Match `PUBLIC_SITE_URL` to the browser origin, including scheme/port |
-| Social link unavailable            | Set its confirmed official HTTPS URL                                 |
-| Uploaded but not published         | Submit the same form again to register the retained upload path      |
-| Functions rejects env names        | Use the Firebase env example; remove reserved names                  |
+| Symptom                         | Fix                                                                  |
+| ------------------------------- | -------------------------------------------------------------------- |
+| Login is being configured       | Fill Web config/project settings, then restart/redeploy              |
+| `ADMIN_REQUIRED`                | Grant admin claim, then sign out/in                                  |
+| `FIREBASE_NOT_CONFIGURED`       | Check credentials, project, and random salt                          |
+| `CLOUDINARY_NOT_CONFIGURED`     | Fill cloud name, API key, and real API secret; restart/redeploy      |
+| Firestore/Auth permission error | Check runtime service-account IAM roles/project                      |
+| `ORIGIN_DENIED`                 | Match `PUBLIC_SITE_URL` to the browser origin, including scheme/port |
+| Social link unavailable         | Set its confirmed official HTTPS URL                                 |
+| Uploaded but not published      | Submit the same form again to register the retained public ID        |
+| Functions rejects env names     | Use the Firebase env example; remove reserved names                  |
 
 ## Source map
 
-| Location                                              | Purpose                                                 |
-| ----------------------------------------------------- | ------------------------------------------------------- |
-| `server.js`                                           | Node entrypoint / Express export                        |
-| `lib/app.js`                                          | API, authentication, security, static serving           |
-| `lib/firebase.js`, `lib/store.js`                     | Admin SDK, database, uploads                            |
-| `lib/config.js`, `lib/validation.js`, `lib/errors.js` | Config/validation/error handling                        |
-| `public/index.html`, `gallery.html`, `contact.html`   | Public pages                                            |
-| `public/login/index.html`, `public/admin/index.html`  | Admin pages                                             |
-| `public/css/styles.css`, `public/js/`                 | Styles and vanilla JS                                   |
-| `client/firebase.js`                                  | Modular browser SDK source                              |
-| `scripts/`                                            | Build, trusted admin assignment, optional image seeding |
-| `tests/`                                              | HTTP/security and upload tests                          |
-| `firebase.json`, `firebase.functions.js`, `*.rules`   | Firebase deployment/access                              |
-| `vercel.json`, `Procfile`                             | Other host configuration                                |
+| Location                                              | Purpose                                                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------- |
+| `server.js`                                           | Node entrypoint / Express export                                      |
+| `lib/app.js`                                          | API, authentication, security, static serving                         |
+| `lib/firebase.js`, `lib/store.js`                     | Admin SDK and database                                                |
+| `lib/photos.js`, `public/js/upload.js`                | Signed Cloudinary upload, verification, deletion and browser progress |
+| `lib/config.js`, `lib/validation.js`, `lib/errors.js` | Config/validation/error handling                                      |
+| `public/index.html`, `gallery.html`, `contact.html`   | Public pages                                                          |
+| `public/login/index.html`, `public/admin/index.html`  | Admin pages                                                           |
+| `public/css/styles.css`, `public/js/`                 | Styles and vanilla JS                                                 |
+| `client/firebase.js`                                  | Modular browser SDK source                                            |
+| `scripts/`                                            | Build, trusted admin assignment, optional image seeding               |
+| `tests/`                                              | HTTP/security and upload tests                                        |
+| `firebase.json`, `firebase.functions.js`, `*.rules`   | Firebase deployment/access                                            |
+| `vercel.json`, `Procfile`                             | Other host configuration                                              |
 
 Original MIT license retained. Third-party images and Firebase SDK retain their respective licences. Official SCMU branding/event photography should be supplied by their owners.

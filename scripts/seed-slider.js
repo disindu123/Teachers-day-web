@@ -1,31 +1,27 @@
 import { readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../lib/config.js';
 import { createFirebaseServices } from '../lib/firebase.js';
+import { ownerKey } from '../lib/photos.js';
 
-// Optional: copy the six bundled illustrative slides into your Firebase bucket.
-// Run only once on an empty slider collection; real celebration photos replace these.
+// Optional: copy illustrative slides to Cloudinary and their metadata to Firestore.
 try {
-  const { store } = createFirebaseServices(loadConfig())();
+  const { store, photos } = createFirebaseServices(loadConfig())();
   if ((await store.getSlider()).items.length)
     throw new Error('Slider already contains images. Manage them through the dashboard instead.');
-  const photos = JSON.parse(
+  const slides = JSON.parse(
     await readFile(new URL('../public/assets/starter-slides.json', import.meta.url), 'utf8'),
   );
-  for (const [index, photo] of photos.entries()) {
-    const bytes = await readFile(new URL(`../public${photo.imageUrl}`, import.meta.url));
-    const name = createHash('sha256').update(photo.imageUrl).digest('hex').slice(0, 32);
-    const path = `slider/seed/${name}.jpg`;
-    await store.bucket.file(path).save(bytes, {
-      resumable: false,
-      metadata: {
-        contentType: 'image/jpeg',
-        cacheControl: 'public, max-age=31536000, immutable',
-      },
-    });
-    await store.addImage('slider', { order: index }, path);
+  for (const [index, slide] of slides.entries()) {
+    const publicId = `scmu/slider/${ownerKey('seed')}/${randomUUID()}`;
+    await photos.uploadLocal(
+      fileURLToPath(new URL(`../public${slide.imageUrl}`, import.meta.url)),
+      publicId,
+    );
+    await store.addImage('slider', { order: index }, publicId);
   }
-  console.log('Six illustrative slides were saved to Firebase Storage and Firestore.');
+  console.log('Six illustrative slides were saved to Cloudinary and Firestore.');
 } catch (error) {
   console.error(error.message);
   process.exit(1);

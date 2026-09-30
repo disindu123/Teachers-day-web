@@ -1,5 +1,6 @@
 import { api, getConfig, icon, safeImage, setStatus } from './common.js';
-import { initFirebase, onAuthStateChanged, signOut, uploadPhoto } from './firebase.bundle.js';
+import { initFirebase, onAuthStateChanged, signOut } from './firebase.bundle.js';
+import { uploadPhoto } from './upload.js';
 
 let firebase,
   user,
@@ -319,8 +320,7 @@ function setupUpload(collection) {
         progress.hidden = false;
         if (!form.dataset.pendingPath)
           form.dataset.pendingPath = await uploadPhoto(
-            firebase.storage,
-            user,
+            adminApi,
             collection,
             fileInput.files[0],
             (percent) => {
@@ -328,7 +328,7 @@ function setupUpload(collection) {
               setStatus(status, `Uploading photograph… ${percent}%`);
             },
           );
-        body.storagePath = form.dataset.pendingPath;
+        body.publicId = form.dataset.pendingPath;
         setStatus(status, 'Publishing your photograph…');
       }
       await adminApi(`/api/${collection}`, { method: 'POST', body });
@@ -347,9 +347,9 @@ function setupUpload(collection) {
       await loaders[collection]();
       await stats();
     } catch (error) {
-      const message = error.code?.startsWith('storage/')
-        ? 'The upload could not be completed. Check your connection and administrator access, then try again.'
-        : error.message;
+      if (['UPLOAD_NOT_FOUND', 'INVALID_IMAGE'].includes(error.code))
+        delete form.dataset.pendingPath;
+      const message = error.message;
       setStatus(
         status,
         `${message}${form.dataset.pendingPath ? ' Your upload is saved; submit again to retry publishing.' : ''}`,

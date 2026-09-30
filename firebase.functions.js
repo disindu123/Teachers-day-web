@@ -7,7 +7,7 @@ export const web = onRequest(
     memory: '512MiB',
     timeoutSeconds: 60,
     maxInstances: 10,
-    secrets: ['RATE_LIMIT_SALT'],
+    secrets: ['RATE_LIMIT_SALT', 'CLOUDINARY_API_SECRET'],
   },
   app,
 );
