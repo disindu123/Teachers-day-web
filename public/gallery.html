@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gallery | ගුරු අභිවන්දනා 2k26 · SCMU</title>
+    <meta
+      name="description"
+      content="Teacher's Day celebration photographs from Sri Sanghabodhi National College, Nittambuwa, presented by SCMU."
+    />
+    <meta name="theme-color" content="#112e5a" />
+    <link rel="icon" href="/assets/favicon.svg" />
+
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script type="module" src="/js/gallery.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="SCMU home"
+          ><img
+            src="/assets/scmu-logo.svg"
+            alt="Sanghabodhi College Media Unit"
+            width="240"
+            height="58" /></a
+        ><button
+          class="menu-toggle icon-button"
+          aria-label="Open menu"
+          aria-expanded="false"
+          aria-controls="navigation"
+        >
+          <svg class="icon"><use href="/assets/icons.svg#menu"></use></svg>
+        </button>
+        <nav id="navigation" class="navigation" aria-label="Main navigation">
+          <a href="/">Home</a><a href="/gallery" aria-current="page">Gallery</a
+          ><a href="/contact">Contact</a
+          ><a class="admin-link" href="/login/index.html"
+            ><svg class="icon"><use href="/assets/icons.svg#lock"></use></svg> Admin Login</a
+          >
+        </nav>
+      </div>
+    </header>
+    <main id="main">
+      <section class="page-heading container">
+        <p class="eyebrow">THE CELEBRATION ALBUM · SCMU</p>
+        <h1>Every moment.<br /><em>A reason to be grateful.</em></h1>
+        <p class="sinhala-copy" lang="si">ගුරු අභිවන්දනා 2k26 — මතකයේ රැඳෙන සුන්දර අවස්ථා.</p>
+        <p>Captured with care by the Media Unit of Sanghabodhi College.</p>
+      </section>
+      <section class="container gallery-section" aria-label="Celebration photographs">
+        <div class="gallery-toolbar">
+          <span
+            ><svg class="icon"><use href="/assets/icons.svg#camera"></use></svg> Celebration
+            photographs</span
+          ><span class="muted" id="gallery-total">Loading photographs…</span>
+        </div>
+        <p class="gallery-notice" id="gallery-notice" role="status" hidden></p>
+        <div class="gallery-grid" id="gallery-grid"></div>
+        <div class="empty-state" id="gallery-empty" hidden>
+          <svg class="icon"><use href="/assets/icons.svg#camera"></use></svg>
+          <h2>The album is on its way.</h2>
+          <p>Celebration photographs will appear here when SCMU publishes them.</p>
+        </div>
+        <div class="center">
+          <button class="button button-outline" id="load-more" hidden>Load more photographs</button>
+        </div>
+        <p class="form-status" id="gallery-status" role="status"></p>
+      </section>
+      <section class="gallery-cta container">
+        <div>
+          <p class="eyebrow">BEHIND EVERY MEMORY, A TEACHER.</p>
+          <h2>Have a thank you to share?</h2>
+        </div>
+        <a class="button button-primary" href="/contact">Leave a message</a>
+      </section>
+    </main>
+    <dialog class="lightbox" id="lightbox" aria-label="Photo viewer">
+      <button
+        class="icon-button lightbox-close"
+        id="lightbox-close"
+        aria-label="Close photo viewer"
+      >
+        <svg class="icon"><use href="/assets/icons.svg#close"></use></svg></button
+      ><button
+        class="icon-button lightbox-prev"
+        id="lightbox-prev"
+        aria-label="Previous photograph"
+      >
+        <svg class="icon"><use href="/assets/icons.svg#chevron-left"></use></svg>
+      </button>
+      <figure>
+        <img id="lightbox-image" src="/assets/empty-photo.svg" alt="" />
+        <figcaption>
+          <p id="lightbox-caption"></p>
+          <span id="lightbox-count" aria-live="polite"></span>
+        </figcaption>
+      </figure>
+      <button class="icon-button lightbox-next" id="lightbox-next" aria-label="Next photograph">
+        <svg class="icon"><use href="/assets/icons.svg#chevron-right"></use></svg>
+      </button>
+    </dialog>
+    <footer class="site-footer">
+      <div class="container footer-main">
+        <div>
+          <a class="footer-brand" href="/">SCMU<span>Sanghabodhi College Media Unit</span></a>
+          <p>Documenting moments.<br />Honouring the people behind them.</p>
+        </div>
+        <div class="footer-theme">
+          <span lang="si">ගුරු අභිවන්දනා 2k26</span>
+          <p>Sri Sanghabodhi National College, Nittambuwa</p>
+        </div>
+        <nav aria-label="Footer navigation">
+          <a href="/">Home</a><a href="/gallery">Gallery</a><a href="/contact">Contact</a>
+        </nav>
+      </div>
+      <div class="container footer-bottom">
+        <span>© 2026 SCMU. All rights reserved.</span
+        ><span>Created by the Media Unit of Sanghabodhi College.</span>
+      </div>
+    </footer>
+    <noscript
+      ><p class="noscript-notice">
+        Enable JavaScript to view photographs and open the photo viewer.
+      </p></noscript
+    >
+  </body>
+</html>

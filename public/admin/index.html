@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Celebration Dashboard | SCMU</title>
+    <link rel="icon" href="/assets/favicon.svg" />
+
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script type="module" src="/js/admin.js"></script>
+  </head>
+  <body class="admin-body">
+    <a class="skip-link" href="#dashboard">Skip to dashboard</a>
+    <header class="site-header admin-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="SCMU home"
+          ><img
+            src="/assets/scmu-logo.svg"
+            alt="Sanghabodhi College Media Unit"
+            width="240"
+            height="58"
+        /></a>
+        <div class="admin-header-actions">
+          <a href="/" target="_blank" rel="noopener noreferrer">View website</a
+          ><button class="button button-outline" id="logout" hidden>
+            <svg class="icon"><use href="/assets/icons.svg#logout"></use></svg> Logout
+          </button>
+        </div>
+      </div>
+    </header>
+    <div class="admin-loading" id="auth-loading" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      <p>Checking your administrator access…</p>
+      <a class="back-link" href="/login/index.html">Return to login</a>
+    </div>
+    <main class="container dashboard" id="dashboard" hidden>
+      <div class="dashboard-heading">
+        <div>
+          <p class="eyebrow">SCMU ADMINISTRATION · 2026</p>
+          <h1>Celebration dashboard</h1>
+          <p lang="si">ගුරු අභිවන්දනා 2k26</p>
+        </div>
+        <span class="admin-user" id="admin-user"></span>
+      </div>
+      <div class="stat-grid">
+        <article class="stat-card">
+          <svg class="icon"><use href="/assets/icons.svg#message"></use></svg>
+          <div><strong id="stat-messages">—</strong><span>Feedback messages</span></div>
+        </article>
+        <article class="stat-card">
+          <svg class="icon"><use href="/assets/icons.svg#camera"></use></svg>
+          <div><strong id="stat-gallery">—</strong><span>Gallery photographs</span></div>
+        </article>
+        <article class="stat-card">
+          <svg class="icon"><use href="/assets/icons.svg#grid"></use></svg>
+          <div><strong id="stat-slider">—</strong><span>Homepage slides</span></div>
+        </article>
+      </div>
+      <p class="form-status" id="admin-status" role="status"></p>
+      <div class="admin-tabs" role="tablist" aria-label="Dashboard sections">
+        <button
+          class="admin-tab"
+          id="tab-messages"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-messages"
+          data-tab="messages"
+        >
+          <svg class="icon"><use href="/assets/icons.svg#message"></use></svg> Feedback</button
+        ><button
+          class="admin-tab"
+          id="tab-gallery"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-gallery"
+          tabindex="-1"
+          data-tab="gallery"
+        >
+          <svg class="icon"><use href="/assets/icons.svg#camera"></use></svg> Gallery</button
+        ><button
+          class="admin-tab"
+          id="tab-slider"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-slider"
+          tabindex="-1"
+          data-tab="slider"
+        >
+          <svg class="icon"><use href="/assets/icons.svg#grid"></use></svg> Image slider
+        </button>
+      </div>
+      <section
+        class="admin-panel"
+        id="panel-messages"
+        role="tabpanel"
+        aria-labelledby="tab-messages"
+      >
+        <div class="panel-heading">
+          <div>
+            <h2>Messages of gratitude</h2>
+            <p>Private feedback from the Sanghabodhi community.</p>
+          </div>
+          <button class="button button-outline" id="refresh-messages">Refresh</button>
+        </div>
+        <div class="message-head" aria-hidden="true">
+          <span>Name</span><span>Message</span><span>Received</span><span></span>
+        </div>
+        <div class="message-list" id="message-list"></div>
+        <div class="empty-state" id="messages-empty" hidden>
+          <svg class="icon"><use href="/assets/icons.svg#message"></use></svg>
+          <h2>No messages yet.</h2>
+          <p>Feedback will appear here when a visitor sends a message.</p>
+        </div>
+        <div class="center">
+          <button class="button button-outline" id="messages-more" hidden>
+            Load more messages
+          </button>
+        </div>
+        <p class="form-status" id="messages-status" role="status"></p>
+      </section>
+      <section
+        class="admin-panel"
+        id="panel-gallery"
+        role="tabpanel"
+        aria-labelledby="tab-gallery"
+        hidden
+      >
+        <div class="panel-heading">
+          <div>
+            <h2>Celebration gallery</h2>
+            <p>Publish photographs and manage the public album.</p>
+          </div>
+          <button class="button button-outline" id="refresh-gallery">Refresh</button>
+        </div>
+        <div class="admin-content-layout">
+          <aside class="upload-card">
+            <h3>Add a photograph</h3>
+            <p>
+              JPG, PNG, WebP, or GIF. Up to 10 MB.<br />Choose only approved celebration
+              photographs.
+            </p>
+            <form class="upload-form" id="gallery-form">
+              <label for="gallery-file">Photo</label
+              ><input
+                class="file-input"
+                id="gallery-file"
+                name="file"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                required
+              /><img
+                class="upload-preview"
+                id="gallery-upload-preview"
+                src="/assets/empty-photo.svg"
+                alt="Selected photograph preview"
+                hidden
+              /><label for="gallery-caption">Caption <span class="muted">(optional)</span></label
+              ><input
+                class="form-input"
+                id="gallery-caption"
+                name="caption"
+                maxlength="300"
+                placeholder="A few words about this moment"
+              /><progress
+                id="gallery-progress"
+                max="100"
+                value="0"
+                aria-label="Photo upload progress"
+                hidden
+              ></progress
+              ><button class="button button-primary" type="submit">
+                <svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> Publish
+                photograph
+              </button>
+              <p class="form-status" id="gallery-upload-status" role="status"></p>
+            </form>
+          </aside>
+          <div>
+            <div class="admin-photo-grid" id="admin-gallery-grid"></div>
+            <div class="empty-state" id="admin-gallery-empty" hidden>
+              <h2>Your album starts here.</h2>
+              <p>Upload the first celebration photograph.</p>
+            </div>
+            <div class="center">
+              <button class="button button-outline" id="gallery-more" hidden>
+                Load more photographs
+              </button>
+            </div>
+            <p class="form-status" id="admin-gallery-status" role="status"></p>
+          </div>
+        </div>
+      </section>
+      <section
+        class="admin-panel"
+        id="panel-slider"
+        role="tabpanel"
+        aria-labelledby="tab-slider"
+        hidden
+      >
+        <div class="panel-heading">
+          <div>
+            <h2>Homepage image slider</h2>
+            <p>Add, remove, and arrange your celebration's first impressions.</p>
+          </div>
+          <button class="button button-outline" id="refresh-slider">Refresh</button>
+        </div>
+        <div class="admin-content-layout">
+          <aside class="upload-card">
+            <h3>Add a slide</h3>
+            <p>Use a landscape photo. A collection of 5–7 slides works well.</p>
+            <div class="upload-mode" aria-label="Slide source">
+              <button type="button" id="mode-upload" aria-pressed="true">Upload photo</button
+              ><button type="button" id="mode-url" aria-pressed="false">Image URL</button>
+            </div>
+            <form class="upload-form" id="slider-form">
+              <div id="slider-upload-field">
+                <label for="slider-file">Photo</label
+                ><input
+                  class="file-input"
+                  id="slider-file"
+                  name="file"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  required
+                />
+              </div>
+              <div id="slider-url-field" hidden>
+                <label for="slider-url">Public HTTPS image URL</label
+                ><input
+                  class="form-input"
+                  id="slider-url"
+                  name="imageUrl"
+                  type="url"
+                  disabled
+                  placeholder="https://example.com/photo.jpg"
+                />
+              </div>
+              <img
+                class="upload-preview"
+                id="slider-upload-preview"
+                src="/assets/empty-photo.svg"
+                alt="Selected slide preview"
+                hidden
+              /><label for="slider-order">Display order</label
+              ><input
+                class="form-input"
+                id="slider-order"
+                name="order"
+                type="number"
+                value="0"
+                min="0"
+                max="9999"
+                required
+              />
+              <p class="muted">Lower numbers appear first.</p>
+              <progress
+                id="slider-progress"
+                max="100"
+                value="0"
+                aria-label="Slide upload progress"
+                hidden
+              ></progress
+              ><button class="button button-primary" type="submit">
+                <svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> Add slide
+              </button>
+              <p class="form-status" id="slider-upload-status" role="status"></p>
+            </form>
+          </aside>
+          <div>
+            <div class="slider-list" id="admin-slider-list"></div>
+            <div class="empty-state" id="slider-empty" hidden>
+              <h2>Set the scene.</h2>
+              <p>
+                Add your first slide. Until then, the homepage shows the bundled illustrative
+                photographs.
+              </p>
+            </div>
+            <p class="form-status" id="admin-slider-status" role="status"></p>
+          </div>
+        </div>
+      </section>
+      <p class="dashboard-footer">SCMU · Sri Sanghabodhi National College, Nittambuwa</p>
+    </main>
+    <dialog class="confirm-dialog" id="delete-dialog" aria-labelledby="delete-title">
+      <h2 id="delete-title">Delete this item?</h2>
+      <p id="delete-description"></p>
+      <form method="dialog">
+        <div class="button-row">
+          <button class="button button-outline" value="cancel">Cancel</button
+          ><button class="button button-danger" value="delete">Delete permanently</button>
+        </div>
+      </form>
+    </dialog>
+    <noscript
+      ><p class="noscript-notice">Enable JavaScript to sign in and use the dashboard.</p></noscript
+    >
+  </body>
+</html>

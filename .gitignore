@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+service-account*.json
+*serviceAccount*.json
+.firebase/
+.vercel/
+coverage/
+*.log
+*.zip
+.DS_Store
