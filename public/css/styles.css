@@ -866,9 +866,18 @@ textarea {
   width: 20px;
   height: 20px;
 }
-.social-link.youtube[href]:hover {
-  background: #fff0f0;
+.social-link.youtube[href]:hover,
+.social-link.youtube[href]:focus-visible,
+.social-link.youtube[href]:active {
+  background: #ff0000;
+  color: #fff;
   border-color: #ff0000;
+}
+.social-link.youtube[href]:hover .icon,
+.social-link.youtube[href]:focus-visible .icon,
+.social-link.youtube[href]:active .icon {
+  background: #fff;
+  border-radius: 4px;
 }
 .social-link[aria-disabled='true'] .icon {
   opacity: 0.55;
