@@ -25,7 +25,7 @@
     }
   ],
   "functions": {
-    "server.js": {
+    "firebase.functions.js": {
       "includeFiles": "public/**",
       "maxDuration": 60
     }
