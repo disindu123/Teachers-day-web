@@ -121,6 +121,7 @@ function renderSocials(social) {
     facebook: 'Facebook',
     tiktok: 'TikTok',
     instagram: 'Instagram',
+    youtube: 'YouTube',
     website: 'Official website',
   };
   for (const area of document.querySelectorAll('[data-social-links]')) {
