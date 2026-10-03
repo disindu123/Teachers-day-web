@@ -22,6 +22,10 @@ const services = {
   auth: {
     async verifyIdToken(token, checkRevoked) {
       state.revokedChecked = checkRevoked;
+      if (token === 'credential-failure')
+        throw Object.assign(new Error('Private credential detail'), {
+          code: 'app/invalid-credential',
+        });
       if (token === 'admin-token')
         return { uid: 'adminuid', email: 'admin@gmail.com', admin: true };
       if (token === 'viewer-token') return { uid: 'viewer', admin: false };
@@ -111,6 +115,12 @@ test('client configuration never exposes Admin secrets', async () => {
 test('missing and invalid tokens cannot read feedback', async () => {
   assert.equal((await request('/api/messages')).status, 401);
   assert.equal((await request('/api/messages', { token: 'invalid' })).status, 401);
+});
+test('server credential failure is not reported as an expired session', async () => {
+  const result = await request('/api/admin/me', { token: 'credential-failure' });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.error.code, 'AUTH_SERVICE_UNAVAILABLE');
+  assert.ok(!JSON.stringify(result.body).includes('Private credential detail'));
 });
 test('an authenticated non-admin cannot access any admin management route', async () => {
   for (const [path, method] of [
