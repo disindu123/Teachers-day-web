@@ -350,6 +350,33 @@ figure {
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+/* A travelling gold highlight follows the existing text shapes. */
+@media (prefers-reduced-motion: no-preference) {
+  .sinhala-title > span {
+    background-image: linear-gradient(
+      110deg,
+      #76511a 0%,
+      #bb8c38 32%,
+      #e0bd6e 43%,
+      #fff1bf 50%,
+      #e0bd6e 57%,
+      #9b6c21 68%,
+      #c59b4a 100%
+    );
+    background-size: 250% 100%;
+    animation: title-gold-glow 4.5s ease-in-out infinite;
+  }
+}
+@keyframes title-gold-glow {
+  0%, 100% {
+    background-position: 100% 50%;
+    filter: drop-shadow(0 0 2px rgb(223 196 132 / 15%));
+  }
+  50% {
+    background-position: 0% 50%;
+    filter: drop-shadow(0 0 9px rgb(223 196 132 / 45%));
+  }
+}
 .sinhala-title .title-year {
   font-family: 'Montserrat', sans-serif;
   font-size: 0.56em;
