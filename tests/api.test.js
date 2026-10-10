@@ -2,330 +2,325 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../lib/app.js';
 import { loadConfig } from '../lib/config.js';
+import { FirebaseStore } from '../lib/store.js';
 import { HttpError } from '../lib/errors.js';
-import { ownerKey } from '../lib/photos.js';
-
-// Test doubles are injected only here; the application has no demo admin or bypass.
-const state = { messages: [], gallery: [], slider: [], count: 0, revokedChecked: false };
+import { MemoryDB } from './helpers.js';
+const db = new MemoryDB(),
+  store = new FirebaseStore(db, { destroy: async () => {} });
+let blocked = false,
+  revoked = false,
+  server,
+  origin;
 const services = {
+  store,
   photos: {
-    signUpload(collection, uid) {
-      return {
-        collection,
-        uid,
-        params: {
-          public_id: `scmu/${collection}/${ownerKey(uid)}/00000000-0000-4000-8000-000000000000`,
-        },
-      };
-    },
+    ticket: async (c, uid, type, size) => ({
+      collection: c,
+      uid,
+      contentType: type,
+      size,
+      ticketId: 'permit',
+      storagePath: 'path',
+    }),
   },
   auth: {
-    async verifyIdToken(token, checkRevoked) {
-      state.revokedChecked = checkRevoked;
-      if (token === 'credential-failure')
-        throw Object.assign(new Error('Private credential detail'), {
-          code: 'app/invalid-credential',
-        });
-      if (token === 'admin-token')
-        return { uid: 'adminuid', email: 'admin@gmail.com', admin: true };
-      if (token === 'viewer-token') return { uid: 'viewer', admin: false };
-      throw new Error('Invalid token');
+    verifyIdToken: async (token, check) => {
+      revoked = check;
+      if (token === 'credential-error')
+        throw Object.assign(new Error('private secret'), { code: 'app/invalid-credential' });
+      if (!['admin', 'teacher', 'student', 'disabled'].includes(token)) throw new Error('bad');
+      return { uid: token, email: `${token}@school.example` };
     },
   },
-  store: {
-    async submitMessage(data) {
-      if (state.count++ >= 5) throw new HttpError(429, 'RATE_LIMITED', 'Please try later.');
-      const item = {
-        id: `message-${state.messages.length}`,
-        ...data,
-        createdAt: new Date().toISOString(),
-      };
-      state.messages.push(item);
-      return item;
-    },
-    async list(collection, options) {
-      return { items: state[collection].slice(0, options.limit), nextCursor: null };
-    },
-    async getSlider() {
-      return { items: state.slider };
-    },
-    async addImage(collection, data, path) {
-      const item = {
-        id: `image-${state[collection].length}`,
-        ...data,
-        imageUrl: data.imageUrl || `https://example.com/${path}`,
-      };
-      state[collection].push(item);
-      return item;
-    },
-    async remove(collection, id) {
-      const index = state[collection].findIndex((item) => item.id === id);
-      if (index === -1) throw new HttpError(404, 'NOT_FOUND', 'Not found.');
-      state[collection].splice(index, 1);
-    },
-    async setSliderOrder(id, order) {
-      const item = state.slider.find((item) => item.id === id);
-      if (!item) throw new HttpError(404, 'NOT_FOUND', 'Not found.');
-      item.order = order;
-    },
-    async stats() {
-      return {
-        messages: state.messages.length,
-        gallery: state.gallery.length,
-        slider: state.slider.length,
-      };
+  accounts: {
+    create: async (data) => ({ id: 'created', ...data, password: undefined }),
+    change: async (id, data, actor, remove) => ({ id, ...data }),
+  },
+  login: {
+    signIn: async () => {
+      if (blocked) throw new HttpError(403, 'IP_BLOCKED', 'Blocked');
+      return { customToken: 'test-only-token', role: 'admin' };
     },
   },
 };
-let server, origin;
+store.getIpBlock = async () => blocked;
 before(async () => {
-  const config = loadConfig({
-    RATE_LIMIT_SALT: 'test-only-secret',
-    FB_PRIVATE_KEY: 'private-test-value',
-    CLOUDINARY_API_SECRET: 'cloudinary-private-test-value',
-  });
-  server = createApp({ config, getServices: () => services }).listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
+  for (const role of ['admin', 'teacher', 'student', 'disabled'])
+    await db
+      .collection('users')
+      .doc(role)
+      .set({
+        role: role === 'disabled' ? 'admin' : role,
+        email: `${role}@school.example`,
+        disabled: role === 'disabled',
+      });
+  server = createApp({
+    config: loadConfig({
+      RATE_LIMIT_SALT: 'test-only-salt',
+      FB_PRIVATE_KEY: 'private-test-secret',
+    }),
+    getServices: () => services,
+  }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
   origin = `http://127.0.0.1:${server.address().port}`;
 });
-after(() => new Promise((resolve) => server.close(resolve)));
+after(() => new Promise((r) => server.close(r)));
 async function request(path, { method = 'GET', body, token, headers = {} } = {}) {
-  const result = await fetch(origin + path, {
+  const res = await fetch(origin + path, {
     method,
     headers: {
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   return {
-    status: result.status,
-    headers: result.headers,
-    body: result.status === 204 ? null : await result.json(),
+    status: res.status,
+    headers: res.headers,
+    body: res.status === 204 ? null : await res.json(),
   };
 }
-test('client configuration never exposes Admin secrets', async () => {
-  const result = await request('/api/config');
-  assert.equal(result.status, 200);
-  assert.ok(!JSON.stringify(result.body).includes('private-test-value'));
-  assert.ok(!JSON.stringify(result.body).includes('test-only-secret'));
-  assert.ok(!JSON.stringify(result.body).includes('cloudinary-private-test-value'));
+test('public configuration omits Admin secrets and salts', async () => {
+  const res = await request('/api/config');
+  assert.equal(res.status, 200);
+  assert.ok(!JSON.stringify(res.body).includes('private-test-secret'));
+  assert.ok(!JSON.stringify(res.body).includes('test-only-salt'));
 });
-test('missing and invalid tokens cannot read feedback', async () => {
-  assert.equal((await request('/api/messages')).status, 401);
+test('role matrix protects every management route independently of dashboard visibility', async () => {
+  const cases = [
+    ['/api/messages', 'GET', ['admin', 'teacher']],
+    ['/api/messages/missing', 'DELETE', ['admin']],
+    ['/api/gallery', 'POST', ['admin', 'teacher', 'student']],
+    ['/api/slider', 'POST', ['admin', 'teacher']],
+    ['/api/gallery/missing', 'DELETE', ['admin']],
+    ['/api/slider/missing', 'PATCH', ['admin']],
+    ['/api/accounts', 'GET', ['admin']],
+    ['/api/accounts', 'POST', ['admin']],
+    ['/api/accounts/missing', 'PATCH', ['admin']],
+    ['/api/accounts/missing', 'DELETE', ['admin']],
+    ['/api/popups', 'POST', ['admin']],
+    ['/api/popups/missing', 'DELETE', ['admin']],
+    ['/api/live', 'PUT', ['admin']],
+    ['/api/settings', 'PUT', ['admin']],
+    ['/api/blocked-ips', 'GET', ['admin']],
+    ['/api/blocked-ips', 'POST', ['admin']],
+    ['/api/blocked-ips/192.0.2.1', 'DELETE', ['admin']],
+    ['/api/media-heads/president', 'PUT', ['admin']],
+    ['/api/media-heads/president', 'DELETE', ['admin']],
+  ];
+  for (const [path, method, allowed] of cases)
+    for (const token of [undefined, 'student', 'teacher']) {
+      if (allowed.includes(token)) continue;
+      assert.equal(
+        (await request(path, { method, token, ...(method === 'GET' ? {} : { body: {} }) })).status,
+        token ? 403 : 401,
+        `${token || 'anonymous'} ${method} ${path}`,
+      );
+    }
+});
+test('revocation and disabled profiles are checked on every staff request', async () => {
+  assert.equal((await request('/api/admin/me', { token: 'admin' })).status, 200);
+  assert.equal(revoked, true);
+  assert.equal((await request('/api/admin/me', { token: 'disabled' })).status, 403);
   assert.equal((await request('/api/messages', { token: 'invalid' })).status, 401);
+  const res = await request('/api/admin/me', { token: 'credential-error' });
+  assert.equal(res.status, 503);
+  assert.ok(!JSON.stringify(res.body).includes('private secret'));
 });
-test('server credential failure is not reported as an expired session', async () => {
-  const result = await request('/api/admin/me', { token: 'credential-failure' });
-  assert.equal(result.status, 503);
-  assert.equal(result.body.error.code, 'AUTH_SERVICE_UNAVAILABLE');
-  assert.ok(!JSON.stringify(result.body).includes('Private credential detail'));
-});
-test('an authenticated non-admin cannot access any admin management route', async () => {
-  for (const [path, method] of [
-    ['/api/messages', 'GET'],
-    ['/api/messages/x', 'DELETE'],
-    ['/api/gallery', 'POST'],
-    ['/api/gallery/x', 'DELETE'],
-    ['/api/slider', 'POST'],
-    ['/api/slider/x', 'DELETE'],
-    ['/api/slider/x', 'PATCH'],
-    ['/api/admin/stats', 'GET'],
-    ['/api/uploads/sign', 'POST'],
-  ])
-    assert.equal(
-      (
-        await request(path, {
-          method,
-          token: 'viewer-token',
-          ...(method === 'POST' || method === 'PATCH' ? { body: {} } : {}),
-        })
-      ).status,
-      403,
-    );
-});
-test('valid admin authorization asks Firebase to check token revocation', async () => {
-  assert.equal((await request('/api/admin/me', { token: 'admin-token' })).status, 200);
-  assert.equal(state.revokedChecked, true);
-});
-test('feedback accepts Sinhala and keeps HTML as inert text', async () => {
-  const data = { name: 'ගුරු උපහාර', message: '<script>alert(1)</script> ස්තුතියි!' };
-  const result = await request('/api/messages', { method: 'POST', body: data });
-  assert.equal(result.status, 201);
-  assert.equal(state.messages.at(-1).message, data.message);
-});
-test('invalid feedback is rejected before writing to Firestore', async () => {
-  const count = state.messages.length;
-  for (const body of [
-    { name: 'a', message: 'hello' },
+test('feedback is private, validates only Name/Message, and persists Sinhala safely', async () => {
+  const body = { name: 'සඟබෝ සිසුවා', message: '<script>alert(1)</script> ස්තුතියි!' };
+  assert.equal((await request('/api/messages', { method: 'POST', body })).status, 201);
+  const feedback = await request('/api/messages', { token: 'teacher' });
+  assert.equal(feedback.body.items[0].message, body.message);
+  assert.ok(feedback.body.items[0].createdAt);
+  for (const data of [
+    { name: 'x', message: 'hello' },
     { name: 'User', message: '' },
-    { name: 'User', message: 'a'.repeat(2001) },
-    { name: 12, message: 'hello' },
+    { name: 'User', message: 'x'.repeat(2001) },
   ])
-    assert.equal((await request('/api/messages', { method: 'POST', body })).status, 400);
-  assert.equal(state.messages.length, count);
-});
-test('browser mutations from another origin are rejected', async () => {
+    assert.equal((await request('/api/messages', { method: 'POST', body: data })).status, 400);
   assert.equal(
     (
       await request('/api/messages', {
         method: 'POST',
-        body: { name: 'User', message: 'Thank you' },
-        headers: { Origin: 'https://attacker.example' },
+        body,
+        headers: { Origin: 'https://other.example' },
       })
     ).status,
     403,
   );
 });
-test('feedback rate-limit errors propagate correctly', async () => {
-  state.count = 5;
-  const result = await request('/api/messages', {
-    method: 'POST',
-    body: { name: 'User', message: 'Thank you' },
-  });
-  assert.equal(result.status, 429);
-  state.count = 0;
+test('public and Student gallery responses omit uploader/date metadata', async () => {
+  const data = {
+    imageUrl: 'https://images.example/photo.jpg',
+    caption: 'SCMU',
+    facebookAlbumUrl: 'https://www.facebook.com/media/set/?set=a.123',
+    albumTitle: 'Our event',
+    postedBy: 'forged',
+    createdAt: 'forged',
+  };
+  const added = await request('/api/gallery', { method: 'POST', token: 'student', body: data });
+  assert.equal(added.status, 201);
+  assert.equal(added.body.postedBy, undefined);
+  for (const token of [undefined, 'student']) {
+    const res = await request('/api/gallery', { token });
+    assert.equal(res.body.items[0].postedBy, undefined);
+    assert.equal(res.body.items[0].createdAt, undefined);
+    assert.equal(res.body.items[0].storagePath, undefined);
+  }
+  const staff = await request('/api/gallery', { token: 'teacher' });
+  assert.equal(staff.body.items[0].postedBy, 'student');
+  assert.notEqual(staff.body.items[0].createdAt, 'forged');
+  assert.equal(staff.body.items[0].facebookAlbumUrl, data.facebookAlbumUrl);
+  assert.equal(
+    (await request(`/api/gallery/${added.body.id}`, { method: 'DELETE', token: 'admin' })).status,
+    204,
+  );
 });
-test('gallery upload must belong to the authenticated admin and collection', async () => {
-  const file = '00000000-0000-4000-8000-000000000000';
-  for (const publicId of [
-    `scmu/gallery/${ownerKey('other')}/${file}`,
-    `scmu/slider/${ownerKey('adminuid')}/${file}`,
-    `scmu/gallery/${ownerKey('adminuid')}/../../private`,
+test('Students upload only gallery; Teachers can upload slides; Admins upload board/events', async () => {
+  for (const [token, collection, status] of [
+    ['student', 'gallery', 201],
+    ['student', 'slider', 403],
+    ['teacher', 'slider', 201],
+    ['teacher', 'popups', 403],
+    ['admin', 'mediaHeads', 201],
   ])
     assert.equal(
       (
-        await request('/api/gallery', {
+        await request('/api/uploads/ticket', {
           method: 'POST',
-          token: 'admin-token',
-          body: { publicId },
+          token,
+          body: { collection, contentType: 'image/jpeg', size: 100 },
         })
       ).status,
-      400,
+      status,
     );
 });
-test('admin can register an uploaded gallery image and later delete it', async () => {
-  const result = await request('/api/gallery', {
-    method: 'POST',
-    token: 'admin-token',
-    body: {
-      publicId: `scmu/gallery/${ownerKey('adminuid')}/00000000-0000-4000-8000-000000000000`,
-      caption: 'Thank you, teachers',
-    },
-  });
-  assert.equal(result.status, 201);
-  assert.equal(result.body.caption, 'Thank you, teachers');
-  assert.equal((await request('/api/gallery')).body.items.length, 1);
-  assert.equal(
-    (await request(`/api/gallery/${result.body.id}`, { method: 'DELETE', token: 'admin-token' }))
-      .status,
-    204,
-  );
-});
-test('slider rejects unsafe URLs and noninteger orders', async () => {
-  for (const body of [
-    { imageUrl: 'javascript:alert(1)', order: 0 },
-    { imageUrl: 'http://example.com/image.jpg', order: 0 },
-    { imageUrl: 'https://user:password@example.com/image.jpg', order: 0 },
-    { imageUrl: 'https://example.com/image.jpg', order: -1 },
-    { imageUrl: 'https://example.com/image.jpg', order: 1.2 },
+test('URL and order validation prevents unsafe photos and unrelated album links', async () => {
+  for (const imageUrl of [
+    'javascript:alert(1)',
+    'http://example.com/a.jpg',
+    'https://user:secret@example.com/a.jpg',
+    'https://127.0.0.1/a.jpg',
   ])
     assert.equal(
-      (await request('/api/slider', { method: 'POST', token: 'admin-token', body })).status,
+      (await request('/api/slider', { method: 'POST', token: 'admin', body: { imageUrl } })).status,
       400,
     );
-});
-test('admin can add, reorder, and remove a URL slide', async () => {
-  const result = await request('/api/slider', {
-    method: 'POST',
-    token: 'admin-token',
-    body: { imageUrl: 'https://example.com/photo.jpg', order: 1 },
-  });
-  assert.equal(result.status, 201);
   assert.equal(
     (
-      await request(`/api/slider/${result.body.id}`, {
-        method: 'PATCH',
-        token: 'admin-token',
-        body: { order: 3 },
+      await request('/api/gallery', {
+        method: 'POST',
+        token: 'admin',
+        body: {
+          imageUrl: 'https://images.example/photo.jpg',
+          facebookAlbumUrl: 'https://evil.example/a',
+        },
       })
     ).status,
-    204,
+    400,
   );
-  assert.equal((await request('/api/slider')).body.items[0].order, 3);
   assert.equal(
-    (await request(`/api/slider/${result.body.id}`, { method: 'DELETE', token: 'admin-token' }))
-      .status,
-    204,
-  );
-});
-test('pagination limits and item IDs are bounded', async () => {
-  assert.equal((await request('/api/gallery?limit=101')).status, 400);
-  assert.equal(
-    (await request('/api/messages/bad.id', { method: 'DELETE', token: 'admin-token' })).status,
+    (
+      await request('/api/slider', {
+        method: 'POST',
+        token: 'teacher',
+        body: { imageUrl: 'https://images.example/photo.jpg', order: 1.2 },
+      })
+    ).status,
     400,
   );
 });
-test('public pages include CSP and do not expose environment files', async () => {
-  const home = await fetch(origin);
-  assert.equal(home.status, 200);
-  assert.ok(home.headers.get('content-security-policy').includes("script-src 'self'"));
-  const missing = await fetch(`${origin}/.env`);
-  assert.equal(missing.status, 404);
+test('live viewer accepts exact YouTube/Facebook videos and clears when switched off', async () => {
+  const added = await request('/api/live', {
+    method: 'PUT',
+    token: 'admin',
+    body: { platform: 'youtube', url: 'https://youtu.be/dQw4w9WgXcQ', isLive: true },
+  });
+  assert.equal(added.status, 200);
+  assert.equal(added.body.embedUrl, 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+  assert.equal(
+    (
+      await request('/api/live', {
+        method: 'PUT',
+        token: 'admin',
+        body: {
+          platform: 'youtube',
+          url: 'https://evil.example/watch?v=dQw4w9WgXcQ',
+          isLive: true,
+        },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (await request('/api/live', { method: 'PUT', token: 'admin', body: { isLive: false } })).body
+      .embedUrl,
+    '',
+  );
 });
-test('unconfigured Firebase cannot silently accept or lose messages', async () => {
-  const unavailable = createApp({
-    config: loadConfig({}),
-    getServices: () => {
-      throw new HttpError(503, 'FIREBASE_NOT_CONFIGURED', 'Service unavailable');
-    },
-  }).listen(0, '127.0.0.1');
-  await new Promise((r) => unavailable.once('listening', r));
+test('board positions can be edited without replacing another position', async () => {
+  for (const name of ['First President', 'New President'])
+    assert.equal(
+      (
+        await request('/api/media-heads/president', {
+          method: 'PUT',
+          token: 'admin',
+          body: { name },
+        })
+      ).status,
+      200,
+    );
+  const res = await request('/api/media-heads');
+  assert.equal(res.body.items.length, 1);
+  assert.equal(res.body.items[0].name, 'New President');
+});
+test('maintenance applies to HTML/public writes but staff login and tools remain available', async () => {
+  await request('/api/settings', {
+    method: 'PUT',
+    token: 'admin',
+    body: { maintenanceMode: true },
+  });
+  assert.equal((await fetch(origin)).status, 503);
+  assert.equal((await fetch(`${origin}/login/index.html`)).status, 200);
+  assert.equal((await request('/api/gallery')).status, 503);
+  assert.equal((await request('/api/gallery', { token: 'teacher' })).status, 200);
+  assert.equal(
+    (await request('/api/messages', { method: 'POST', body: { name: 'User', message: 'Hello' } }))
+      .status,
+    503,
+  );
+  await request('/api/settings', {
+    method: 'PUT',
+    token: 'admin',
+    body: { maintenanceMode: false },
+  });
+});
+test('blocked IP cannot load staff HTML or use APIs, but public pages remain accessible', async () => {
+  blocked = true;
   try {
-    const result = await fetch(`http://127.0.0.1:${unavailable.address().port}/api/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'User', message: 'Thank you' }),
-    });
-    assert.equal(result.status, 503);
+    assert.equal((await fetch(`${origin}/login/index.html`)).status, 403);
+    assert.equal((await fetch(`${origin}/admin/index.html`)).status, 403);
+    assert.equal((await request('/api/admin/me', { token: 'admin' })).status, 403);
+    assert.equal((await fetch(origin)).status, 200);
+    assert.equal((await request('/api/gallery')).status, 200);
   } finally {
-    await new Promise((r) => unavailable.close(r));
+    blocked = false;
   }
 });
-
-test('upload signing requires an admin and a bounded collection', async () => {
-  assert.equal(
-    (await request('/api/uploads/sign', { method: 'POST', body: { collection: 'gallery' } }))
-      .status,
-    401,
-  );
+test('security headers, cache controls, body bounds and environment-file isolation', async () => {
+  const home = await fetch(origin);
+  assert.ok(home.headers.get('content-security-policy').includes("script-src 'self'"));
+  assert.equal(home.headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(`${origin}/.env`)).status, 404);
   assert.equal(
     (
-      await request('/api/uploads/sign', {
+      await request('/api/messages', {
         method: 'POST',
-        token: 'admin-token',
-        body: { collection: '../private' },
+        body: { name: 'User', message: 'x'.repeat(30_000) },
       })
     ).status,
-    400,
+    413,
   );
-  const result = await request('/api/uploads/sign', {
-    method: 'POST',
-    token: 'admin-token',
-    body: { collection: 'gallery' },
-  });
-  assert.equal(result.status, 200);
-  assert.ok(result.body.params.public_id.startsWith(`scmu/gallery/${ownerKey('adminuid')}/`));
-});
-test('Firebase Web configuration works without a Storage bucket', () => {
-  const config = loadConfig({
-    FB_PROJECT_ID: 'school-event',
-    FB_WEB_API_KEY: 'web-key',
-    FB_WEB_AUTH_DOMAIN: 'school-event.firebaseapp.com',
-    FB_WEB_APP_ID: 'app-id',
-  });
-  assert.equal(config.configured, true);
-  assert.equal(config.public.uploadsConfigured, false);
-  assert.equal(config.firebase.storageBucket, undefined);
 });

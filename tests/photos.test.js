@@ -1,123 +1,146 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryPhotos, ownerKey, validatePublicId, MAX_IMAGE_BYTES } from '../lib/photos.js';
+import { Timestamp } from 'firebase-admin/firestore';
+import { StoragePhotos, MAX_IMAGE_BYTES } from '../lib/photos.js';
 import { FirebaseStore } from '../lib/store.js';
-
-const config = {
-  cloudName: 'test-cloud',
-  apiKey: '123456',
-  apiSecret: 'test-secret',
-  configured: true,
-};
-const publicId = `scmu/gallery/${ownerKey('adminuid')}/00000000-0000-4000-8000-000000000000`;
-function photosFor(overrides = {}) {
-  const deleted = [];
-  const client = {
-    utils: cloudinary.utils,
-    api: {
-      async resource(id) {
-        return {
-          public_id: id,
-          resource_type: 'image',
-          type: 'upload',
-          format: 'jpg',
-          version: 123,
-          bytes: 100,
-          ...overrides,
-        };
+import { MemoryDB } from './helpers.js';
+function setup() {
+  const db = new MemoryDB(),
+    files = new Map(),
+    deleted = [];
+  const bucket = {
+    name: 'test.firebasestorage.app',
+    file: (path) => ({
+      getMetadata: async () => {
+        if (!files.has(path)) throw { code: 404 };
+        return [files.get(path).metadata];
       },
-    },
-    uploader: {
-      async destroy(id) {
-        deleted.push(id);
-        return { result: 'ok' };
+      download: async () => [files.get(path).bytes],
+      setMetadata: async (data) => Object.assign(files.get(path).metadata, data),
+      delete: async () => {
+        deleted.push(path);
+        files.delete(path);
       },
-    },
+    }),
   };
-  return { photos: new CloudinaryPhotos(config, client), deleted };
+  return { db, files, deleted, photos: new StoragePhotos(db, bucket) };
 }
-test('signed upload restricts the public ID, formats and overwrite without exposing the secret', () => {
-  const photos = photosFor().photos;
-  const ticket = photos.signUpload('gallery', 'adminuid');
-  validatePublicId(ticket.params.public_id, 'gallery', 'adminuid');
-  assert.equal(ticket.params.overwrite, false);
-  assert.equal(ticket.params.allowed_formats, 'jpg,jpeg,png,webp,gif');
-  const { signature, ...params } = ticket.params;
-  assert.equal(signature, cloudinary.utils.api_sign_request(params, config.apiSecret));
-  assert.ok(!JSON.stringify(ticket).includes(config.apiSecret));
+async function uploaded(ctx, collection = 'gallery', uid = 'owner') {
+  const ticket = await ctx.photos.ticket(collection, uid, 'image/png', 12);
+  ctx.files.set(ticket.storagePath, {
+    metadata: { contentType: 'image/png', size: 12 },
+    bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]),
+  });
+  return ticket;
+}
+test('upload permits restrict MIME/size and are single-use and owned', async () => {
+  const ctx = setup();
+  for (const [type, size] of [
+    ['image/svg+xml', 12],
+    ['image/jpeg', 0],
+    ['image/png', MAX_IMAGE_BYTES + 1],
+  ])
+    await assert.rejects(ctx.photos.ticket('gallery', 'owner', type, size), {
+      code: 'INVALID_IMAGE',
+    });
+  const ticket = await uploaded(ctx);
+  await assert.rejects(ctx.photos.inspect(ticket.ticketId, 'gallery', 'other'), {
+    code: 'INVALID_UPLOAD',
+  });
+  await assert.rejects(ctx.photos.inspect(ticket.ticketId, 'slider', 'owner'), {
+    code: 'INVALID_UPLOAD',
+  });
+  const inspected = await ctx.photos.inspect(ticket.ticketId, 'gallery', 'owner');
+  assert.ok(inspected.imageUrl.startsWith('https://firebasestorage.googleapis.com/'));
+  assert.equal(inspected.storagePath, ticket.storagePath);
 });
-test('authoritative image metadata generates an optimized URL in this cloud', async () => {
-  const photos = photosFor().photos;
-  const url = await photos.uploadedImage(publicId);
-  assert.ok(
-    url.startsWith(
-      'https://res.cloudinary.com/test-cloud/image/upload/f_auto,q_auto,c_limit,w_2000/v123/',
-    ),
+test('server checks binary signatures and metadata before publication', async () => {
+  const ctx = setup(),
+    ticket = await uploaded(ctx);
+  ctx.files.get(ticket.storagePath).bytes = Buffer.from('<svg onload="evil()">');
+  await assert.rejects(ctx.photos.inspect(ticket.ticketId, 'gallery', 'owner'), {
+    code: 'INVALID_IMAGE',
+  });
+  ctx.files.get(ticket.storagePath).metadata.size = 100;
+  await assert.rejects(ctx.photos.inspect(ticket.ticketId, 'gallery', 'owner'), {
+    code: 'INVALID_IMAGE',
+  });
+});
+test('expired uploads cannot be published; unavailable Storage fails closed', async () => {
+  const ctx = setup(),
+    ticket = await uploaded(ctx);
+  await ctx.db
+    .collection('_uploads')
+    .doc(ticket.ticketId)
+    .update({ expiresAt: Timestamp.fromMillis(0) });
+  await assert.rejects(ctx.photos.inspect(ticket.ticketId, 'gallery', 'owner'), {
+    code: 'UPLOAD_EXPIRED',
+  });
+  await assert.rejects(
+    new StoragePhotos(ctx.db, null).ticket('gallery', 'owner', 'image/png', 12),
+    { code: 'STORAGE_NOT_CONFIGURED' },
   );
-  assert.equal(photos.publicIdFromUrl(url, 'gallery'), publicId);
-  assert.equal(photos.publicIdFromUrl(url, 'slider'), null);
-  assert.equal(photos.publicIdFromUrl(url.replace('test-cloud', 'other-cloud'), 'gallery'), null);
 });
-test('oversize and non-image assets are removed and never published', async () => {
-  for (const metadata of [
-    { bytes: MAX_IMAGE_BYTES + 1 },
-    { format: 'svg' },
-    { resource_type: 'raw' },
-    { bytes: 0 },
-  ]) {
-    const { photos, deleted } = photosFor(metadata);
-    await assert.rejects(photos.uploadedImage(publicId), { code: 'INVALID_IMAGE' });
-    assert.deepEqual(deleted, [publicId]);
-  }
-});
-test('missing Cloudinary configuration does not create a usable upload signature', () => {
-  const photos = new CloudinaryPhotos({ ...config, configured: false });
-  assert.throws(() => photos.signUpload('gallery', 'adminuid'), {
-    code: 'CLOUDINARY_NOT_CONFIGURED',
+test('registration is idempotent and cannot reuse an upload for another document', async () => {
+  const ctx = setup(),
+    ticket = await uploaded(ctx),
+    store = new FirebaseStore(ctx.db, ctx.photos);
+  const image = await store.prepareImage('gallery', { ticketId: ticket.ticketId }, 'owner');
+  const first = await store.saveContent('gallery', { caption: 'First' }, image);
+  const second = await store.saveContent('gallery', { caption: 'Changed' }, image);
+  assert.equal(first.id, second.id);
+  assert.equal(second.caption, 'First');
+  await assert.rejects(store.saveContent('gallery', {}, image, 'different'), {
+    code: 'UPLOAD_EXPIRED',
   });
+  assert.equal((await ctx.db.collection('gallery').get()).size, 1);
 });
-test('provider not-found errors give a retryable upload error', async () => {
-  const photos = new CloudinaryPhotos(config, {
-    api: {
-      async resource() {
-        throw { http_code: 404 };
-      },
-    },
-  });
-  await assert.rejects(photos.uploadedImage(publicId), { code: 'UPLOAD_NOT_FOUND' });
+test('editing a board contact retains its managed image; replacing it removes the old upload', async () => {
+  const ctx = setup(),
+    ticket = await uploaded(ctx, 'mediaHeads'),
+    store = new FirebaseStore(ctx.db, ctx.photos);
+  const image = await store.prepareImage(
+    'mediaHeads',
+    { ticketId: ticket.ticketId },
+    'owner',
+    true,
+    'photoUrl',
+  );
+  const first = await store.saveContent('mediaHeads', { name: 'President' }, image, 'president');
+  const keep = await store.prepareImage(
+    'mediaHeads',
+    { photoUrl: first.photoUrl },
+    'owner',
+    true,
+    'photoUrl',
+  );
+  await store.saveContent('mediaHeads', { name: 'Edited President' }, keep, 'president');
+  assert.deepEqual(ctx.deleted, []);
+  assert.equal((await store.getItem('mediaHeads', 'president')).storagePath, ticket.storagePath);
+  await store.saveContent(
+    'mediaHeads',
+    { name: 'New President' },
+    { imageUrl: 'https://example.com/new.jpg', storagePath: '' },
+    'president',
+  );
+  assert.deepEqual(ctx.deleted, [ticket.storagePath]);
 });
-test('failed provider deletion retains metadata, while external URL items leave assets untouched', async () => {
-  let removed = false,
-    destroyed = 0;
-  const photos = photosFor().photos;
-  const url = await photos.uploadedImage(publicId);
-  const { createHash } = await import('node:crypto');
-  const managedId = createHash('sha256').update(publicId).digest('hex').slice(0, 32);
-  const db = {
-    collection() {
-      return {
-        doc() {
-          return {
-            async get() {
-              return { exists: true, data: () => ({ imageUrl: url }) };
-            },
-            async delete() {
-              removed = true;
-            },
-          };
-        },
-      };
-    },
+test('failed Storage deletion retains metadata; external URLs are never deleted from a provider', async () => {
+  const ctx = setup(),
+    store = new FirebaseStore(ctx.db, ctx.photos);
+  await ctx.db
+    .collection('gallery')
+    .doc('owned')
+    .set({ storagePath: 'uploads/gallery/owner/photo.png' });
+  ctx.photos.destroy = async () => {
+    throw new Error('unavailable');
   };
-  photos.destroy = async () => {
-    destroyed++;
-    throw new Error('Provider unavailable');
-  };
-  const store = new FirebaseStore(db, photos);
-  await assert.rejects(store.remove('gallery', managedId), /Provider unavailable/);
-  assert.equal(removed, false);
-  await store.remove('gallery', 'external-url-item');
-  assert.equal(removed, true);
-  assert.equal(destroyed, 1);
+  await assert.rejects(store.remove('gallery', 'owned'), /unavailable/);
+  assert.equal((await ctx.db.collection('gallery').doc('owned').get()).exists, true);
+  await ctx.db
+    .collection('gallery')
+    .doc('external')
+    .set({ imageUrl: 'https://example.com/photo.jpg' });
+  await store.remove('gallery', 'external');
+  assert.equal((await ctx.db.collection('gallery').doc('external').get()).exists, false);
 });

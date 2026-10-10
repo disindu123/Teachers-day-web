@@ -5,6 +5,7 @@ const loadMore = document.querySelector('#load-more');
 const notice = document.querySelector('#gallery-notice');
 const status = document.querySelector('#gallery-status');
 const photos = [];
+const albums = new Map();
 let cursor = null,
   selected = 0,
   busy = false;
@@ -25,13 +26,36 @@ async function load() {
       if (error.code !== 'FIREBASE_NOT_CONFIGURED') throw error;
       result = { items: await starterPhotos(), nextCursor: null };
       notice.textContent =
-        'Preview album · These are illustrative education photographs. SCMU will publish the official celebration photographs here.';
+        'Preview album · These are illustrative education photographs. SCMU will publish the official SCMU photographs here.';
       notice.hidden = false;
     }
     for (const photo of result.items) {
       const index = photos.length;
       photos.push(photo);
-      grid.append(photoCard(photo, { index, onClick: () => open(index) }));
+      const key = photo.facebookAlbumUrl || 'scmu';
+      if (!albums.has(key)) {
+        const album = document.createElement('article');
+        album.className = 'gallery-album';
+        const heading = document.createElement('h2');
+        heading.textContent =
+          photo.albumTitle || (photo.facebookAlbumUrl ? 'SCMU album' : 'From our lens');
+        album.append(heading);
+        const photosGrid = document.createElement('div');
+        photosGrid.className = 'album-grid';
+        album.append(photosGrid);
+        if (photo.facebookAlbumUrl) {
+          const link = document.createElement('a');
+          link.className = 'button button-outline album-more';
+          link.textContent = 'View more on Facebook';
+          link.href = photo.facebookAlbumUrl;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          album.append(link);
+        }
+        grid.append(album);
+        albums.set(key, photosGrid);
+      }
+      albums.get(key).append(photoCard(photo, { index, onClick: () => open(index) }));
     }
     cursor = result.nextCursor;
     loadMore.hidden = !cursor;
@@ -52,9 +76,9 @@ async function load() {
 function show(index) {
   selected = (index + photos.length) % photos.length;
   const photo = photos[selected];
-  viewer.alt = photo.caption || 'Teacher’s Day celebration photograph';
+  viewer.alt = photo.caption || 'Sanghabodhi College photograph';
   safeImage(viewer, photo.imageUrl);
-  document.querySelector('#lightbox-caption').textContent = photo.caption || 'ගුරු අභිවන්දනා 2k26';
+  document.querySelector('#lightbox-caption').textContent = photo.caption || 'සඟබෝ පැහැසර';
   document.querySelector('#lightbox-count').textContent = `${selected + 1} / ${photos.length}`;
 }
 function open(index) {

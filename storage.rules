@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function profile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function permitted(section) {
+      return request.auth != null && profile().disabled == false &&
+        (profile().role == 'admin' ||
+         profile().role == 'teacher' && section in ['gallery', 'slider'] ||
+         profile().role == 'student' && section == 'gallery');
+    }
+    // Browsers upload only into a server-issued, expiring, single-use permit.
+    // Publishing, download-token generation and deletion are server operations.
+    match /uploads/{section}/{uid}/{filename} {
+      function permit() {
+        return firestore.get(/databases/(default)/documents/_uploads/$(filename.split('[.]')[0])).data;
+      }
+      allow create: if resource == null && permitted(section) && uid == request.auth.uid &&
+        permit().uid == request.auth.uid && permit().collection == section &&
+        permit().storagePath == 'uploads/' + section + '/' + uid + '/' + filename &&
+        permit().consumed == false && permit().expiresAt > request.time &&
+        request.resource.size > 0 && request.resource.size <= 10 * 1024 * 1024 &&
+        request.resource.size == permit().size &&
+        request.resource.contentType == permit().contentType &&
+        request.resource.contentType in ['image/jpeg','image/png','image/webp','image/gif'];
+      allow read, update, delete: if false;
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}
