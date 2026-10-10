@@ -219,11 +219,6 @@ export async function setupCommon() {
     const config = await getConfig();
     renderSocials({ ...config.social, email: `mailto:${config.email}` });
     for (const logo of document.querySelectorAll('.brand img')) safeImage(logo, config.logoUrl);
-    const event = document.querySelector('#event-date');
-    if (event && !event.dataset.published && config.eventDate) {
-      event.textContent = `Celebration: ${new Intl.DateTimeFormat('en-LK', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Colombo' }).format(new Date(config.eventDate))} (Sri Lanka time)`;
-      event.hidden = false;
-    }
   } catch {
     /* The page and form remain usable during a configuration request failure. */
   }
@@ -339,6 +334,7 @@ async function setupNotifications() {
   if (!latest) return;
   const featured = document.querySelector('.special-event');
   if (featured) {
+    featured.hidden = false;
     document.querySelector('#event-title').textContent = latest.title;
     document.querySelector('#event-message').textContent = latest.message;
     featured.querySelector('.eyebrow').textContent = 'SPECIAL EVENT';

@@ -284,3 +284,17 @@ test('navigation underline follows hover and focus; reduced motion keeps section
     await page.locator('#navigation').evaluate((node) => getComputedStyle(node).position),
   ).toBe('absolute');
 });
+
+test('homepage special-event section has no hardcoded fallback when dashboard events are empty', async ({
+  page,
+}) => {
+  await page.route('**/api/popups?*', (route) =>
+    route.fulfill({ json: { items: [], nextCursor: null } }),
+  );
+  await page.goto('/');
+  await expect(page.locator('.special-event')).toBeHidden();
+  await expect(page.locator('#event-title')).toBeEmpty();
+  await expect(page.locator('#event-message')).toBeEmpty();
+  await page.getByRole('button', { name: 'Event notifications' }).click();
+  await expect(page.getByRole('dialog')).toContainText('No event notices yet');
+});
