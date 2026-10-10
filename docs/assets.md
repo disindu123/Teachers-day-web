@@ -15,4 +15,4 @@ The six photographs in `public/assets/photos/` are illustrative education stock 
 
 [Unsplash licence](https://unsplash.com/license). Images are bundled for the website, not offered as a separate image collection. Replace them with approved event photographs through the dashboard.
 
-Self-hosted Google Fonts: **Poppins**, **Montserrat**, **Noto Sans Sinhala**, and **Abhaya Libre**, under their respective open font licences (included in `public/assets/fonts/`). Interface icons are SVG stroke symbols; the custom book favicon is not an official school crest. No school photos, event date, social accounts, or testimonials are invented.
+Self-hosted Google Fonts: **Poppins**, **Montserrat**, **Noto Sans Sinhala**, and **Abhaya Libre**, under their respective open font licences (included in `public/assets/fonts/`). Interface icons are SVG stroke symbols; the existing favicon is retained from the supplied repository. Confirm permission to use it. No board identities, school photos or testimonials are invented. The requested YouTube channel and the existing event date are retained; other unknown social links stay disabled.

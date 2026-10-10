@@ -3,19 +3,19 @@ import {
   getAuth,
   browserSessionPersistence,
   setPersistence,
-  signInWithEmailAndPassword,
+  signInWithCustomToken,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-
+import { getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 let instance;
 export async function initFirebase(config) {
-  if (!config) throw new Error('Admin login is being configured. Please contact SCMU.');
+  if (!config) throw new Error('SCMU staff login is being configured.');
   if (instance) return instance;
-  const app = getApps()[0] || initializeApp(config);
-  const auth = getAuth(app);
+  const app = getApps()[0] || initializeApp(config),
+    auth = getAuth(app);
   await setPersistence(auth, browserSessionPersistence);
-  instance = { auth };
+  instance = { auth, storage: config.storageBucket ? getStorage(app) : null };
   return instance;
 }
-export { signInWithEmailAndPassword, signOut, onAuthStateChanged };
+export { signInWithCustomToken, signOut, onAuthStateChanged, ref, uploadBytesResumable };

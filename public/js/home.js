@@ -6,7 +6,8 @@ async function setupSlider() {
   let starter = false;
   try {
     slides = (await api('/api/slider')).items;
-  } catch {
+  } catch (error) {
+    if (error.code !== 'FIREBASE_NOT_CONFIGURED') throw error;
     slides = [];
   }
   if (!slides.length) {
@@ -35,7 +36,7 @@ async function setupSlider() {
     item.setAttribute('aria-label', `${index + 1} of ${slides.length}`);
     item.setAttribute('aria-hidden', String(index !== 0));
     const image = document.createElement('img');
-    image.alt = slide.caption || `Teacher's Day celebration photograph ${index + 1}`;
+    image.alt = slide.caption || `Sanghabodhi College photograph ${index + 1}`;
     image.decoding = 'async';
     image.loading = index === 0 ? 'eager' : 'lazy';
     if (index === 0) image.fetchPriority = 'high';
@@ -128,7 +129,7 @@ async function setupPreview() {
     if (error.code === 'FIREBASE_NOT_CONFIGURED') {
       items = (await starterPhotos()).slice(0, 3);
       note.textContent =
-        'Illustrative preview images. Official celebration photographs will be published here.';
+        'Illustrative preview images. Official SCMU photographs will be published here.';
     } else {
       note.textContent = 'The album is temporarily unavailable. Please try again shortly.';
       return;
@@ -138,7 +139,7 @@ async function setupPreview() {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     const text = document.createElement('p');
-    text.textContent = 'Celebration photographs will be published here soon.';
+    text.textContent = 'SCMU photographs will be published here soon.';
     empty.append(text);
     root.append(empty);
     return;
@@ -146,9 +147,33 @@ async function setupPreview() {
   items.forEach((photo) => root.append(photoCard(photo)));
 }
 setupSlider().catch(() => {
-  document.querySelector('#starter-label').textContent = 'Celebration photographs coming soon';
+  document.querySelector('#starter-label').textContent = 'SCMU photographs coming soon';
   document.querySelector('#starter-label').hidden = false;
 });
 setupPreview().catch(() => {
   document.querySelector('#gallery-note').textContent = 'The album is temporarily unavailable.';
 });
+
+async function setupLive() {
+  try {
+    const live = await api('/api/live');
+    if (!live.isLive || !live.embedUrl) return;
+    const url = new URL(live.embedUrl);
+    if (!['https://www.youtube-nocookie.com', 'https://www.facebook.com'].includes(url.origin))
+      return;
+    const frame = document.createElement('iframe');
+    frame.src = url.href;
+    frame.title = 'SCMU live broadcast';
+    frame.loading = 'lazy';
+    frame.allow = 'encrypted-media; picture-in-picture; fullscreen';
+    frame.allowFullscreen = true;
+    frame.referrerPolicy = 'strict-origin-when-cross-origin';
+    document.querySelector('#live-frame').append(frame);
+    const link = document.querySelector('#live-link');
+    link.href = live.url;
+    document.querySelector('#live-section').hidden = false;
+  } catch {
+    /* A live viewer is shown only when published. */
+  }
+}
+setupLive();

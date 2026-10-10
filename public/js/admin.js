@@ -2,403 +2,534 @@ import { api, getConfig, icon, safeImage, setStatus } from './common.js';
 import { initFirebase, onAuthStateChanged, signOut } from './firebase.bundle.js';
 import { uploadPhoto } from './upload.js';
 
+const $ = (selector) => document.querySelector(selector);
+const forms = Object.fromEntries(
+  ['gallery', 'slider', 'accounts', 'popups', 'live', 'heads', 'settings', 'ips'].map((key) => [
+    key,
+    $(`#${key}-form`),
+  ]),
+);
+const tabs = {
+  messages: ['Feedback', 'message'],
+  gallery: ['Gallery', 'camera'],
+  slider: ['Image slider', 'grid'],
+  accounts: ['Accounts', 'user'],
+  popups: ['Events', 'bell'],
+  live: ['Live', 'play'],
+  heads: ['Head board', 'users'],
+  settings: ['Availability', 'settings'],
+  ips: ['IP blocks', 'lock'],
+};
+const paths = {
+  messages: 'messages',
+  gallery: 'gallery',
+  slider: 'slider',
+  accounts: 'accounts',
+  popups: 'popups',
+  heads: 'media-heads',
+  ips: 'blocked-ips',
+};
+const roots = {
+  messages: '#message-list',
+  gallery: '#admin-gallery-grid',
+  slider: '#admin-slider-list',
+  accounts: '#account-list',
+  popups: '#popup-list',
+  heads: '#head-list',
+  ips: '#ip-list',
+};
+const states = {};
 let firebase,
   user,
-  activeTab = 'messages';
-const loaded = new Set();
-const cursors = { messages: null, gallery: null };
-const busy = new Set();
-const globalStatus = document.querySelector('#admin-status');
-async function adminApi(url, options = {}) {
-  try {
-    return await api(url, { ...options, token: () => user.getIdToken() });
-  } catch (error) {
-    if (error.status === 401 || error.status === 403) {
-      sessionStorage.setItem('loginNotice', error.message);
-      await signOut(firebase.auth);
-    }
-    throw error;
-  }
-}
-async function stats() {
-  try {
-    const data = await adminApi('/api/admin/stats');
-    for (const key of ['messages', 'gallery', 'slider'])
-      document.querySelector(`#stat-${key}`).textContent = data[key];
-  } catch (error) {
-    setStatus(globalStatus, error.message, 'error');
-  }
-}
-function confirmDelete(collection) {
-  const dialog = document.querySelector('#delete-dialog');
-  dialog.returnValue = 'cancel';
-  document.querySelector('#delete-description').textContent =
-    collection === 'messages'
-      ? 'This feedback message will be permanently removed.'
-      : 'This image will be removed from the website. An uploaded file will also be deleted from storage.';
-  dialog.showModal();
-  return new Promise((resolve) =>
-    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'delete'), {
-      once: true,
-    }),
-  );
-}
-function deleteButton(collection, item, reload) {
-  const button = document.createElement('button');
-  button.className = 'icon-button delete-button';
-  button.type = 'button';
-  button.append(icon('trash'));
-  button.setAttribute(
-    'aria-label',
-    `Delete ${collection === 'messages' ? `message from ${item.name}` : item.caption || 'image'}`,
-  );
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    try {
-      if (!(await confirmDelete(collection))) return;
-      await adminApi(`/api/${collection}/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
-      await reload();
-      await stats();
-      setStatus(globalStatus, 'Item deleted.', 'success');
-    } catch (error) {
-      setStatus(globalStatus, error.message, 'error');
-    } finally {
-      button.disabled = false;
-    }
-  });
-  return button;
-}
-async function loadMessages(append = false) {
-  if (busy.has('messages')) return;
-  busy.add('messages');
-  const status = document.querySelector('#messages-status'),
-    list = document.querySelector('#message-list'),
-    more = document.querySelector('#messages-more');
-  more.disabled = true;
-  setStatus(status, 'Loading messages…');
-  try {
-    const cursor = append ? cursors.messages : null;
-    const data = await adminApi(
-      `/api/messages?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-    );
-    if (!append) list.replaceChildren();
-    data.items.forEach((item) => {
-      const row = document.createElement('article');
-      row.className = 'message-row';
-      const name = document.createElement('strong');
-      name.textContent = item.name;
-      const message = document.createElement('p');
-      message.textContent = item.message;
-      const timestamp = document.createElement('time');
-      timestamp.dateTime = item.createdAt;
-      timestamp.textContent = new Intl.DateTimeFormat('en-LK', {
+  profile,
+  activeTab,
+  booted = false;
+const date = (value) =>
+  value
+    ? new Intl.DateTimeFormat('en-LK', {
         dateStyle: 'medium',
         timeStyle: 'short',
         timeZone: 'Asia/Colombo',
-      }).format(new Date(item.createdAt));
-      row.append(name, message, timestamp, deleteButton('messages', item, loadMessages));
-      list.append(row);
-    });
-    cursors.messages = data.nextCursor;
-    more.hidden = !data.nextCursor;
-    document.querySelector('#messages-empty').hidden = list.children.length !== 0;
-    loaded.add('messages');
-    setStatus(status, '');
-  } catch (error) {
-    setStatus(status, error.message, 'error');
-  } finally {
-    busy.delete('messages');
-    more.disabled = false;
-  }
-}
-async function loadGallery(append = false) {
-  if (busy.has('gallery')) return;
-  busy.add('gallery');
-  const status = document.querySelector('#admin-gallery-status'),
-    grid = document.querySelector('#admin-gallery-grid'),
-    more = document.querySelector('#gallery-more');
-  more.disabled = true;
-  setStatus(status, 'Loading photographs…');
-  try {
-    const cursor = append ? cursors.gallery : null;
-    const data = await adminApi(
-      `/api/gallery?limit=24${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-    );
-    if (!append) grid.replaceChildren();
-    data.items.forEach((item) => {
-      const card = document.createElement('article');
-      card.className = 'admin-photo';
-      const image = document.createElement('img');
-      image.alt = item.caption || 'Celebration photograph';
-      image.loading = 'lazy';
-      safeImage(image, item.imageUrl);
-      const detail = document.createElement('div');
-      detail.className = 'admin-photo-detail';
-      const caption = document.createElement('p');
-      caption.textContent = item.caption || 'No caption';
-      detail.append(caption, deleteButton('gallery', item, loadGallery));
-      card.append(image, detail);
-      grid.append(card);
-    });
-    cursors.gallery = data.nextCursor;
-    more.hidden = !data.nextCursor;
-    document.querySelector('#admin-gallery-empty').hidden = grid.children.length !== 0;
-    loaded.add('gallery');
-    setStatus(status, '');
-  } catch (error) {
-    setStatus(status, error.message, 'error');
-  } finally {
-    busy.delete('gallery');
-    more.disabled = false;
-  }
-}
-async function loadSlider() {
-  if (busy.has('slider')) return;
-  busy.add('slider');
-  const status = document.querySelector('#admin-slider-status'),
-    list = document.querySelector('#admin-slider-list');
-  setStatus(status, 'Loading slides…');
-  try {
-    const data = await adminApi('/api/slider');
-    list.replaceChildren();
-    data.items.forEach((item, index) => {
-      const card = document.createElement('article');
-      card.className = 'slider-item';
-      const image = document.createElement('img');
-      image.alt = `Slide ${index + 1}`;
-      image.loading = 'lazy';
-      safeImage(image, item.imageUrl);
-      const detail = document.createElement('div');
-      const title = document.createElement('p');
-      title.className = 'muted';
-      title.textContent = `Slide ${String(index + 1).padStart(2, '0')}`;
-      const form = document.createElement('form');
-      form.className = 'slider-order';
-      const label = document.createElement('label');
-      label.textContent = 'Order';
-      label.htmlFor = `order-${item.id}`;
-      const input = document.createElement('input');
-      input.id = label.htmlFor;
-      input.className = 'form-input';
-      input.type = 'number';
-      input.min = '0';
-      input.max = '9999';
-      input.required = true;
-      input.value = item.order;
-      const save = document.createElement('button');
-      save.className = 'button button-outline';
-      save.type = 'submit';
-      save.textContent = 'Save';
-      form.append(label, input, save);
-      form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        save.disabled = true;
-        try {
-          await adminApi(`/api/slider/${item.id}`, {
-            method: 'PATCH',
-            body: { order: Number(input.value) },
-          });
-          await loadSlider();
-          setStatus(globalStatus, 'Slide order saved.', 'success');
-        } catch (error) {
-          setStatus(globalStatus, error.message, 'error');
-        } finally {
-          save.disabled = false;
-        }
-      });
-      detail.append(title, form);
-      card.append(image, detail, deleteButton('slider', item, loadSlider));
-      list.append(card);
-    });
-    document.querySelector('#slider-empty').hidden = data.items.length !== 0;
-    if (!document.querySelector('#slider-form').dataset.pendingPath)
-      document.querySelector('#slider-order').value = data.items.length
-        ? Math.max(...data.items.map((x) => x.order)) + 1
-        : 0;
-    loaded.add('slider');
-    setStatus(status, '');
-  } catch (error) {
-    setStatus(status, error.message, 'error');
-  } finally {
-    busy.delete('slider');
-  }
-}
-const loaders = { messages: loadMessages, gallery: loadGallery, slider: loadSlider };
-function switchTab(name) {
-  activeTab = name;
-  for (const tab of document.querySelectorAll('[data-tab]')) {
-    const selected = tab.dataset.tab === name;
-    tab.setAttribute('aria-selected', String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-    document.querySelector(`#panel-${tab.dataset.tab}`).hidden = !selected;
-  }
-  if (user && !loaded.has(name)) loaders[name]();
-}
-for (const tab of document.querySelectorAll('[data-tab]')) {
-  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-  tab.addEventListener('keydown', (event) => {
-    const tabs = [...document.querySelectorAll('[data-tab]')];
-    const index = tabs.indexOf(tab);
-    let next;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = tabs.length - 1;
-    if (next !== undefined) {
-      event.preventDefault();
-      tabs[next].focus();
-      switchTab(tabs[next].dataset.tab);
+      }).format(new Date(value)) + ' SLST'
+    : '';
+const el = (tag, text, className) => {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+};
+function button(label, action, className = 'button button-outline') {
+  const node = el('button', label, className);
+  node.type = 'button';
+  node.addEventListener('click', async () => {
+    node.disabled = true;
+    try {
+      await action();
+    } catch (e) {
+      setStatus($('#admin-status'), e.message, 'error');
+    } finally {
+      node.disabled = false;
     }
   });
+  return node;
 }
-for (const name of ['messages', 'gallery', 'slider'])
-  document.querySelector(`#refresh-${name}`).addEventListener('click', () => loaders[name]());
-document.querySelector('#messages-more').addEventListener('click', () => loadMessages(true));
-document.querySelector('#gallery-more').addEventListener('click', () => loadGallery(true));
-let sliderMode = 'upload';
-for (const mode of ['upload', 'url'])
-  document.querySelector(`#mode-${mode}`).addEventListener('click', () => {
-    if (document.querySelector('#slider-form button[type=submit]').disabled) return;
-    sliderMode = mode;
-    document.querySelector('#slider-upload-field').hidden = mode !== 'upload';
-    document.querySelector('#slider-url-field').hidden = mode !== 'url';
-    document.querySelector('#slider-file').required = mode === 'upload';
-    document.querySelector('#slider-url').required = mode === 'url';
-    document.querySelector('#slider-file').disabled = mode !== 'upload';
-    document.querySelector('#slider-url').disabled = mode !== 'url';
-    for (const m of ['upload', 'url'])
-      document.querySelector(`#mode-${m}`).setAttribute('aria-pressed', String(m === mode));
-    document.querySelector('#slider-upload-preview').hidden =
-      mode !== 'upload' || !document.querySelector('#slider-file').files.length;
+async function staffApi(url, options = {}) {
+  try {
+    return await api(url, { ...options, token: () => user.getIdToken() });
+  } catch (e) {
+    if (e.status === 401 || ['IP_BLOCKED', 'ACCESS_DENIED'].includes(e.code)) {
+      await signOut(firebase.auth);
+      location.replace('/login/index.html');
+    }
+    throw e;
+  }
+}
+async function confirmRemoval(description) {
+  const dialog = $('#confirm-dialog');
+  $('#confirm-description').textContent = description;
+  dialog.returnValue = 'cancel';
+  dialog.showModal();
+  return new Promise((resolve) =>
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'yes'), { once: true }),
+  );
+}
+async function remove(key, item) {
+  if (
+    !(await confirmRemoval(
+      `Remove ${item.name || item.email || item.caption || item.title || item.ip || 'this item'}? This cannot be undone.`,
+    ))
+  )
+    return;
+  await staffApi(`/api/${paths[key]}/${encodeURIComponent(key === 'ips' ? item.ip : item.id)}`, {
+    method: 'DELETE',
   });
-function setupUpload(collection) {
-  const form = document.querySelector(`#${collection}-form`),
-    fileInput = document.querySelector(`#${collection}-file`),
-    preview = document.querySelector(`#${collection}-upload-preview`),
-    progress = document.querySelector(`#${collection}-progress`),
-    status = document.querySelector(`#${collection}-upload-status`),
-    button = form.querySelector('button[type=submit]');
-  let previewUrl;
-  fileInput.addEventListener('change', () => {
-    delete form.dataset.pendingPath;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const file = fileInput.files[0];
-    preview.hidden = !file;
-    setStatus(status, '');
-    if (!file) return;
-    if (
-      !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) ||
-      file.size > 10 * 1024 * 1024 ||
-      !file.size
-    ) {
-      fileInput.value = '';
-      preview.hidden = true;
-      setStatus(status, 'Choose a JPG, PNG, WebP, or GIF smaller than 10 MB.', 'error');
+  await load(key, true);
+  await stats();
+  setStatus(
+    $('#admin-status'),
+    key === 'ips' ? 'Staff access unblocked.' : 'Item removed.',
+    'success',
+  );
+}
+function details(title, body) {
+  const box = el('article', undefined, 'staff-item');
+  box.append(el('h3', title), el('p', body, 'preserve-lines'));
+  return box;
+}
+function fill(form, values) {
+  for (const [key, value] of Object.entries(values)) {
+    const control = form.elements.namedItem(key);
+    if (!control) continue;
+    if (control.type === 'checkbox') control.checked = Boolean(value);
+    else control.value = value ?? '';
+  }
+  form.scrollIntoView({
+    behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'center',
+  });
+}
+function resetEditor(key) {
+  const form = forms[key];
+  form.reset();
+  for (const name of ['uid', 'itemId'])
+    if (form.elements.namedItem(name)) form.elements.namedItem(name).value = '';
+  delete form.dataset.ticketId;
+  for (const control of form.querySelectorAll('input,textarea,select')) control.disabled = false;
+  setStatus(form.querySelector('.form-status'), '');
+  if (key === 'accounts') form.elements.password.required = true;
+}
+function editPhoto(key, item, card) {
+  const editor = el('form', undefined, 'inline-editor');
+  const fields =
+    key === 'gallery' ? ['caption', 'albumTitle', 'facebookAlbumUrl'] : ['caption', 'order'];
+  for (const field of fields) {
+    const control = el('input');
+    control.name = field;
+    control.value = item[field] ?? '';
+    control.type = field === 'order' ? 'number' : field === 'facebookAlbumUrl' ? 'url' : 'text';
+    if (field === 'order') {
+      control.min = '0';
+      control.max = '9999';
+    }
+    const label = el(
+      'label',
+      {
+        caption: 'Caption',
+        albumTitle: 'Album title',
+        facebookAlbumUrl: 'Exact Facebook album URL',
+        order: 'Display order',
+      }[field],
+    );
+    label.append(control);
+    editor.append(label);
+  }
+  const submit = el('button', 'Save details', 'button button-outline');
+  submit.type = 'submit';
+  const status = el('p', '', 'form-status');
+  editor.append(submit, status);
+  editor.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!editor.reportValidity() || submit.disabled) return;
+    submit.disabled = true;
+    try {
+      const body = Object.fromEntries(new FormData(editor));
+      if (key === 'slider') body.order = Number(body.order);
+      await staffApi(`/api/${key}/${item.id}`, { method: 'PATCH', body });
+      setStatus(status, 'Saved.', 'success');
+      await load(key, true);
+    } catch (e) {
+      setStatus(status, e.message, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  card.append(editor);
+}
+function render(key, item) {
+  let card;
+  if (['gallery', 'slider', 'heads'].includes(key)) {
+    card = el('article', undefined, 'admin-content-card');
+    const image = el('img');
+    image.alt = item.caption || item.name || 'SCMU photograph';
+    image.loading = 'lazy';
+    safeImage(image, item.imageUrl || item.photoUrl);
+    card.append(image);
+    const body = el('div', undefined, 'content-card-body');
+    body.append(el('h3', item.caption || item.name || 'Untitled photograph'));
+    if (key === 'heads') body.append(el('p', item.role, 'muted'));
+    else if (['admin', 'teacher'].includes(profile.role))
+      body.append(
+        el(
+          'p',
+          `Posted by ${item.postedByEmail || item.postedBy || 'SCMU'} · ${date(item.createdAt)}`,
+          'muted',
+        ),
+      );
+    if (item.albumTitle) body.append(el('p', item.albumTitle));
+    card.append(body);
+    if (profile.role === 'admin' && key !== 'heads') editPhoto(key, item, body);
+    if (key === 'heads')
+      body.append(
+        button('Edit', () => {
+          resetEditor('heads');
+          fill(forms.heads, { ...item, position: item.id });
+        }),
+      );
+    if (profile.role === 'admin')
+      body.append(button('Remove', () => remove(key, item), 'button button-danger'));
+  } else if (key === 'messages') {
+    card = details(item.name, item.message);
+    card.append(el('time', date(item.createdAt), 'muted'));
+    if (profile.role === 'admin')
+      card.append(button('Delete message', () => remove(key, item), 'button button-danger'));
+  } else if (key === 'accounts') {
+    card = details(item.displayName || item.email, item.email);
+    card.append(
+      el(
+        'p',
+        `${item.role} · ${item.disabled ? 'Disabled' : 'Active'} · ${date(item.createdAt)}`,
+        'muted',
+      ),
+    );
+    card.append(
+      button('Edit account', () => {
+        resetEditor('accounts');
+        fill(forms.accounts, { ...item, uid: item.id, password: '' });
+        forms.accounts.elements.password.required = false;
+      }),
+    );
+    if (item.id !== profile.uid)
+      card.append(button('Delete account', () => remove(key, item), 'button button-danger'));
+  } else if (key === 'popups') {
+    card = details(item.title, item.message);
+    if (item.imageUrl) {
+      const img = el('img');
+      img.className = 'event-thumb';
+      img.alt = item.title;
+      img.loading = 'lazy';
+      safeImage(img, item.imageUrl);
+      card.prepend(img);
+    }
+    card.append(
+      el('time', date(item.createdAt), 'muted'),
+      button('Edit text', () => {
+        resetEditor('popups');
+        fill(forms.popups, { itemId: item.id, title: item.title, message: item.message });
+        forms.popups.elements.file.disabled = true;
+        forms.popups.elements.imageUrl.disabled = true;
+      }),
+      button('Remove event', () => remove(key, item), 'button button-danger'),
+    );
+  } else {
+    card = details(item.ip, item.reason);
+    card.append(
+      el('time', date(item.blockedAt), 'muted'),
+      button('Unblock', () => remove(key, item)),
+    );
+  }
+  return card;
+}
+async function stats() {
+  const counts = await staffApi('/api/admin/stats');
+  const root = $('#stats');
+  root.replaceChildren();
+  const labels = {
+    messages: 'Feedback messages',
+    gallery: 'Gallery photographs',
+    slider: 'Homepage slides',
+    users: 'Staff accounts',
+    popups: 'Event notices',
+  };
+  for (const [key, count] of Object.entries(counts)) {
+    const card = el('article', undefined, 'stat-card');
+    card.append(
+      icon(
+        key === 'messages'
+          ? 'message'
+          : key === 'users'
+            ? 'users'
+            : key === 'popups'
+              ? 'bell'
+              : 'camera',
+      ),
+      el('strong', String(count)),
+      el('span', labels[key]),
+    );
+    root.append(card);
+  }
+}
+async function load(key, refresh = false) {
+  const state = (states[key] ||= { cursor: null, busy: false, loaded: false });
+  if (state.busy) return;
+  state.busy = true;
+  const more = $(`[data-more="${key}"]`);
+  if (more) more.disabled = true;
+  try {
+    if (['live', 'settings'].includes(key)) {
+      fill(forms[key], await staffApi(`/api/${key}`));
+      state.loaded = true;
       return;
     }
-    previewUrl = URL.createObjectURL(file);
-    preview.src = previewUrl;
-  });
-  form.addEventListener('submit', async (event) => {
+    const page = refresh ? null : state.cursor;
+    const result = await staffApi(
+      `/api/${paths[key]}?limit=24${page ? `&cursor=${encodeURIComponent(page)}` : ''}`,
+    );
+    const root = $(roots[key]);
+    if (refresh || !state.loaded) root.replaceChildren();
+    root.querySelector('.empty-state')?.remove();
+    for (const item of result.items) root.append(render(key, item));
+    state.cursor = result.nextCursor || null;
+    state.loaded = true;
+    if (!root.children.length) root.append(el('p', 'Nothing published here yet.', 'empty-state'));
+    if (more) more.hidden = !state.cursor;
+  } catch (e) {
+    setStatus($('#admin-status'), e.message, 'error');
+  } finally {
+    state.busy = false;
+    if (more) more.disabled = false;
+  }
+}
+function activate(key) {
+  activeTab = key;
+  for (const node of $('#dashboard-tabs').children) {
+    const active = node.dataset.tab === key;
+    node.setAttribute('aria-selected', String(active));
+    node.tabIndex = active ? 0 : -1;
+  }
+  for (const node of document.querySelectorAll('.staff-panel'))
+    node.hidden = node.id !== `panel-${key}`;
+  if (!states[key]?.loaded) load(key, true);
+}
+function setupTabs() {
+  const available =
+    profile.role === 'admin'
+      ? Object.keys(tabs)
+      : profile.role === 'teacher'
+        ? ['messages', 'gallery', 'slider']
+        : ['gallery'];
+  const nav = $('#dashboard-tabs');
+  nav.setAttribute('role', 'tablist');
+  for (const key of available) {
+    const tab = button(tabs[key][0], () => activate(key), 'dashboard-tab');
+    tab.prepend(icon(tabs[key][1]));
+    tab.dataset.tab = key;
+    tab.id = `tab-${key}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', `panel-${key}`);
+    $(`#panel-${key}`).setAttribute('role', 'tabpanel');
+    $(`#panel-${key}`).setAttribute('aria-labelledby', tab.id);
+    nav.append(tab);
+  }
+  nav.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    if (!form.reportValidity() || button.disabled) return;
-    button.disabled = true;
-    form.setAttribute('aria-busy', 'true');
-    const controls = [...form.querySelectorAll('input')];
-    controls.forEach((input) => {
-      input.disabled = true;
-    });
-    try {
-      const body =
-        collection === 'gallery'
-          ? { caption: form.caption.value.trim() }
-          : { order: Number(form.order.value) };
-      if (collection === 'slider' && sliderMode === 'url') {
-        body.imageUrl = form.imageUrl.value.trim();
-        setStatus(status, 'Adding your slide…');
-      } else {
-        progress.hidden = false;
-        if (!form.dataset.pendingPath)
-          form.dataset.pendingPath = await uploadPhoto(
-            adminApi,
-            collection,
-            fileInput.files[0],
-            (percent) => {
-              progress.value = percent;
-              setStatus(status, `Uploading photograph… ${percent}%`);
-            },
-          );
-        body.publicId = form.dataset.pendingPath;
-        setStatus(status, 'Publishing your photograph…');
-      }
-      await adminApi(`/api/${collection}`, { method: 'POST', body });
-      delete form.dataset.pendingPath;
-      form.reset();
-      preview.hidden = true;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      progress.hidden = true;
-      setStatus(
-        status,
-        collection === 'gallery'
-          ? 'Photograph published to the gallery.'
-          : 'Slide added to the homepage.',
-        'success',
+    let index = available.indexOf(activeTab);
+    index =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? available.length - 1
+          : (index + (event.key === 'ArrowLeft' ? -1 : 1) + available.length) % available.length;
+    activate(available[index]);
+    $(`#tab-${available[index]}`).focus();
+  });
+  activate(available[0]);
+}
+async function imageBody(key, form, data, collection = key) {
+  const field = key === 'heads' ? 'photoUrl' : 'imageUrl',
+    file = form.elements.file.files[0],
+    url = data.get(field)?.trim();
+  if (file && url) throw new Error('Choose a file or image URL. Clear the other field first.');
+  if (file) {
+    if (!form.dataset.ticketId) {
+      const progress = $(`#${collection}-progress`);
+      progress.hidden = false;
+      progress.value = 0;
+      form.dataset.ticketId = await uploadPhoto(
+        staffApi,
+        firebase.storage,
+        collection,
+        file,
+        (value) => {
+          progress.value = value;
+        },
       );
-      await loaders[collection]();
-      await stats();
-    } catch (error) {
-      if (['UPLOAD_NOT_FOUND', 'INVALID_IMAGE'].includes(error.code))
-        delete form.dataset.pendingPath;
-      const message = error.message;
-      setStatus(
-        status,
-        `${message}${form.dataset.pendingPath ? ' Your upload is saved; submit again to retry publishing.' : ''}`,
-        'error',
-      );
-    } finally {
-      button.disabled = false;
-      controls.forEach((input) => {
-        input.disabled = false;
-      });
-      if (collection === 'slider') {
-        fileInput.disabled = sliderMode !== 'upload';
-        document.querySelector('#slider-url').disabled = sliderMode !== 'url';
-      }
-      form.removeAttribute('aria-busy');
     }
+    return { ticketId: form.dataset.ticketId };
+  }
+  return { [field]: url || '' };
+}
+function setupForms() {
+  for (const [key, form] of Object.entries(forms)) {
+    form.elements.file?.addEventListener('change', () => delete form.dataset.ticketId);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!form.reportValidity() || form.dataset.busy) return;
+      const data = new FormData(form);
+      form.dataset.busy = 'true';
+      form.setAttribute('aria-busy', 'true');
+      const status = form.querySelector('.form-status');
+      setStatus(status, 'Saving…');
+      const submit = form.querySelector('button:not([type="button"])');
+      submit.disabled = true;
+      try {
+        let path = `/api/${paths[key] || key}`,
+          method = 'POST',
+          body;
+        if (['gallery', 'slider'].includes(key)) {
+          body = { ...(await imageBody(key, form, data)), caption: data.get('caption') || '' };
+          if (key === 'gallery')
+            Object.assign(body, {
+              albumTitle: data.get('albumTitle'),
+              facebookAlbumUrl: data.get('facebookAlbumUrl'),
+            });
+          else body.order = Number(data.get('order'));
+        } else if (key === 'accounts') {
+          body = {
+            email: data.get('email'),
+            displayName: data.get('displayName'),
+            role: data.get('role'),
+          };
+          if (data.get('password')) body.password = data.get('password');
+          if (data.get('uid')) {
+            path += `/${data.get('uid')}`;
+            method = 'PATCH';
+            body.disabled = data.get('disabled') === 'on';
+          } else if (!body.password)
+            throw new Error('Create a unique SCMU password with at least 12 characters.');
+        } else if (key === 'popups') {
+          body = { title: data.get('title'), message: data.get('message') };
+          if (data.get('itemId')) {
+            path += `/${data.get('itemId')}`;
+            method = 'PATCH';
+          } else Object.assign(body, await imageBody(key, form, data));
+        } else if (key === 'heads') {
+          method = 'PUT';
+          path += `/${data.get('position')}`;
+          body = { ...(await imageBody(key, form, data, 'mediaHeads')) };
+          for (const name of ['name', 'whatsapp', 'facebook', 'linkedin', 'gmail'])
+            body[name] = data.get(name);
+        } else if (key === 'live') {
+          method = 'PUT';
+          body = {
+            isLive: data.get('isLive') === 'on',
+            platform: data.get('platform'),
+            url: data.get('url'),
+          };
+        } else if (key === 'settings') {
+          method = 'PUT';
+          body = { maintenanceMode: data.get('maintenanceMode') === 'on' };
+        } else body = { ip: data.get('ip'), reason: data.get('reason') };
+        await staffApi(path, { method, body });
+        if (!['live', 'settings'].includes(key)) resetEditor(key);
+        setStatus(status, 'Saved successfully.', 'success');
+        if (!['live', 'settings'].includes(key)) await load(key, true);
+        await stats();
+      } catch (e) {
+        setStatus(status, e.message, 'error');
+      } finally {
+        delete form.dataset.busy;
+        form.removeAttribute('aria-busy');
+        submit.disabled = false;
+        const progress = form.querySelector('progress');
+        if (progress) progress.hidden = true;
+      }
+    });
+  }
+  for (const [id, key] of [
+    ['account-reset', 'accounts'],
+    ['popup-reset', 'popups'],
+    ['head-reset', 'heads'],
+  ])
+    $(`#${id}`).addEventListener('click', () => resetEditor(key));
+  forms.accounts.elements.password.required = true;
+  for (const node of document.querySelectorAll('[data-refresh]'))
+    node.addEventListener('click', () => load(node.dataset.refresh, true));
+  for (const node of document.querySelectorAll('[data-more]'))
+    node.addEventListener('click', () => load(node.dataset.more));
+  $('#logout').addEventListener('click', async () => {
+    await signOut(firebase.auth);
+    location.replace('/login/index.html');
   });
 }
-setupUpload('gallery');
-setupUpload('slider');
-document.querySelector('#logout').addEventListener('click', async () => {
-  await signOut(firebase.auth);
-});
-// Recheck the session when a browser restores a cached dashboard after logout.
+async function start() {
+  try {
+    const config = await getConfig();
+    for (const logo of document.querySelectorAll('.brand img')) safeImage(logo, config.logoUrl);
+    firebase = await initFirebase(config.firebase);
+    onAuthStateChanged(firebase.auth, async (current) => {
+      if (!current) {
+        location.replace('/login/index.html');
+        return;
+      }
+      user = current;
+      if (booted) return;
+      booted = true;
+      try {
+        profile = await staffApi('/api/admin/me');
+        $('#admin-user').textContent = profile.displayName || profile.email;
+        $('#staff-role').textContent = profile.role;
+        $('#current-ip').textContent = `Your IP: ${profile.ip}`;
+        $('#auth-loading').hidden = true;
+        $('#dashboard').hidden = false;
+        $('#logout').hidden = false;
+        setupTabs();
+        setupForms();
+        await stats();
+      } catch (e) {
+        $('#auth-loading').replaceChildren(
+          el('p', e.message, 'form-status error'),
+          button('Return to login', () => {
+            location.replace('/login/index.html');
+          }),
+        );
+      }
+    });
+  } catch (e) {
+    $('#auth-loading').replaceChildren(el('p', e.message, 'form-status error'));
+  }
+}
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) location.reload();
 });
-try {
-  const config = await getConfig();
-  firebase = await initFirebase(config.firebase);
-  onAuthStateChanged(firebase.auth, async (signedInUser) => {
-    if (!signedInUser) {
-      location.replace('/login/index.html');
-      return;
-    }
-    user = signedInUser;
-    try {
-      const profile = await adminApi('/api/admin/me');
-      document.querySelector('#admin-user').textContent = profile.email;
-      document.querySelector('#auth-loading').hidden = true;
-      document.querySelector('#dashboard').hidden = false;
-      document.querySelector('#logout').hidden = false;
-      await Promise.all([stats(), loaders[activeTab]()]);
-    } catch (error) {
-      document.querySelector('#auth-loading p').textContent = error.message;
-      document.querySelector('.spinner').hidden = true;
-    }
-  });
-} catch (error) {
-  document.querySelector('#auth-loading p').textContent = error.message;
-  document.querySelector('.spinner').hidden = true;
-}
+start();
