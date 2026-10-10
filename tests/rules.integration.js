@@ -99,7 +99,8 @@ test('Storage rejects anonymous uploads, forged claims, another owner, missing/e
 test('Storage roles and demotion apply immediately without relying on stale custom claims', async () => {
   await assertFails(put('student', await permit('student', 'slider')));
   await assertSucceeds(put('teacher', await permit('teacher', 'slider')));
-  await assertFails(put('teacher', await permit('teacher', 'popups')));
+  await assertSucceeds(put('teacher', await permit('teacher', 'popups')));
+  await assertSucceeds(put('student', await permit('student', 'popups')));
   await assertSucceeds(put('admin', await permit('admin', 'mediaHeads')));
   await db.collection('users').doc('teacher').update({ role: 'student' });
   await assertFails(put('teacher', await permit('teacher', 'slider')));

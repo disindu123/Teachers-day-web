@@ -96,6 +96,39 @@ function setupNavigation() {
   const button = document.querySelector('.menu-toggle');
   const nav = document.querySelector('#navigation');
   if (!button || !nav) return;
+  const links = [...nav.querySelectorAll(':scope > a:not(.admin-link)')];
+  const active = links.find((link) => link.getAttribute('aria-current') === 'page');
+  const indicator = document.createElement('span');
+  indicator.className = 'nav-indicator';
+  indicator.setAttribute('aria-hidden', 'true');
+  nav.append(indicator);
+  nav.classList.add('has-indicator');
+  let selected = active;
+  function move(link = active) {
+    selected = link;
+    if (!link || !nav.getClientRects().length) {
+      indicator.hidden = true;
+      return;
+    }
+    indicator.hidden = false;
+    indicator.style.width = `${link.offsetWidth}px`;
+    indicator.style.transform = `translate(${link.offsetLeft}px, ${link.offsetTop + link.offsetHeight - 2}px)`;
+  }
+  links.forEach((link) => {
+    link.addEventListener('pointerenter', () => move(link));
+    link.addEventListener('focus', () => move(link));
+  });
+  nav.addEventListener('pointerleave', () =>
+    move(links.includes(document.activeElement) ? document.activeElement : active),
+  );
+  nav.addEventListener('focusout', () =>
+    requestAnimationFrame(() =>
+      move(links.includes(document.activeElement) ? document.activeElement : active),
+    ),
+  );
+  new ResizeObserver(() => move(selected)).observe(nav);
+  document.fonts.ready.then(() => move(selected));
+  move();
   const close = () => {
     nav.classList.remove('open');
     button.setAttribute('aria-expanded', 'false');
@@ -178,6 +211,7 @@ function setupFeedback() {
 }
 export async function setupCommon() {
   setupNavigation();
+  setupMotion();
   setupFeedback();
   setupNotifications();
   setupHeadBoard();
@@ -186,7 +220,7 @@ export async function setupCommon() {
     renderSocials({ ...config.social, email: `mailto:${config.email}` });
     for (const logo of document.querySelectorAll('.brand img')) safeImage(logo, config.logoUrl);
     const event = document.querySelector('#event-date');
-    if (event && config.eventDate) {
+    if (event && !event.dataset.published && config.eventDate) {
       event.textContent = `Celebration: ${new Intl.DateTimeFormat('en-LK', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Colombo' }).format(new Date(config.eventDate))} (Sri Lanka time)`;
       event.hidden = false;
     }
@@ -303,6 +337,23 @@ async function setupNotifications() {
   await load();
   const latest = items[0];
   if (!latest) return;
+  const featured = document.querySelector('.special-event');
+  if (featured) {
+    document.querySelector('#event-title').textContent = latest.title;
+    document.querySelector('#event-message').textContent = latest.message;
+    featured.querySelector('.eyebrow').textContent = 'SPECIAL EVENT';
+    const date = document.querySelector('#event-date');
+    date.dataset.published = 'true';
+    date.hidden = true;
+    if (latest.imageUrl) {
+      const photo = document.createElement('img');
+      photo.className = 'featured-event-image';
+      photo.alt = latest.title;
+      photo.loading = 'lazy';
+      safeImage(photo, latest.imageUrl);
+      featured.querySelector('.event-emblem').replaceChildren(photo);
+    }
+  }
   let seen = false;
   const key = `scmu-event:${latest.id}:${latest.createdAt}`;
   try {
@@ -390,4 +441,42 @@ async function setupHeadBoard() {
   } catch {
     /* Only published board members are displayed. */
   }
+}
+
+// Content remains visible without JavaScript and when reduced motion is requested.
+function setupMotion() {
+  const preference = matchMedia('(prefers-reduced-motion: reduce)');
+  if (!('IntersectionObserver' in window) || preference.matches) return;
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries)
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        }
+    },
+    { threshold: 0.08 },
+  );
+  const selector =
+    '.section-heading, .highlight-card, .photo-card, .board-card, .special-event, .contact-form';
+  const register = () =>
+    document.querySelectorAll(selector).forEach((node) => {
+      if (node.classList.contains('motion-ready')) return;
+      // Only animate content below the viewport; above-the-fold content stays immediate.
+      if (node.getBoundingClientRect().top < innerHeight) node.classList.add('is-visible');
+      node.classList.add('motion-ready');
+      observer.observe(node);
+    });
+  register();
+  const mutations = new MutationObserver(register);
+  mutations.observe(document.querySelector('main') || document.body, {
+    childList: true,
+    subtree: true,
+  });
+  preference.addEventListener('change', (event) => {
+    if (!event.matches) return;
+    observer.disconnect();
+    mutations.disconnect();
+    document.querySelectorAll('.motion-ready').forEach((node) => node.classList.add('is-visible'));
+  });
 }

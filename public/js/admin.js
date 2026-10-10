@@ -250,16 +250,17 @@ function render(key, item) {
       safeImage(img, item.imageUrl);
       card.prepend(img);
     }
-    card.append(
-      el('time', date(item.createdAt), 'muted'),
-      button('Edit text', () => {
-        resetEditor('popups');
-        fill(forms.popups, { itemId: item.id, title: item.title, message: item.message });
-        forms.popups.elements.file.disabled = true;
-        forms.popups.elements.imageUrl.disabled = true;
-      }),
-      button('Remove event', () => remove(key, item), 'button button-danger'),
-    );
+    card.append(el('time', date(item.createdAt), 'muted'));
+    if (profile.role === 'admin')
+      card.append(
+        button('Edit text', () => {
+          resetEditor('popups');
+          fill(forms.popups, { itemId: item.id, title: item.title, message: item.message });
+          forms.popups.elements.file.disabled = true;
+          forms.popups.elements.imageUrl.disabled = true;
+        }),
+        button('Remove event', () => remove(key, item), 'button button-danger'),
+      );
   } else {
     card = details(item.ip, item.reason);
     card.append(
@@ -345,8 +346,8 @@ function setupTabs() {
     profile.role === 'admin'
       ? Object.keys(tabs)
       : profile.role === 'teacher'
-        ? ['messages', 'gallery', 'slider']
-        : ['gallery'];
+        ? ['messages', 'gallery', 'slider', 'popups']
+        : ['gallery', 'popups'];
   const nav = $('#dashboard-tabs');
   nav.setAttribute('role', 'tablist');
   for (const key of available) {

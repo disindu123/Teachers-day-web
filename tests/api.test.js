@@ -99,8 +99,9 @@ test('role matrix protects every management route independently of dashboard vis
     ['/api/accounts', 'POST', ['admin']],
     ['/api/accounts/missing', 'PATCH', ['admin']],
     ['/api/accounts/missing', 'DELETE', ['admin']],
-    ['/api/popups', 'POST', ['admin']],
+    ['/api/popups', 'POST', ['admin', 'teacher', 'student']],
     ['/api/popups/missing', 'DELETE', ['admin']],
+    ['/api/popups/missing', 'PATCH', ['admin']],
     ['/api/live', 'PUT', ['admin']],
     ['/api/settings', 'PUT', ['admin']],
     ['/api/blocked-ips', 'GET', ['admin']],
@@ -178,12 +179,13 @@ test('public and Student gallery responses omit uploader/date metadata', async (
     204,
   );
 });
-test('Students upload only gallery; Teachers can upload slides; Admins upload board/events', async () => {
+test('All roles upload event photos while slider and board permissions remain restricted', async () => {
   for (const [token, collection, status] of [
     ['student', 'gallery', 201],
     ['student', 'slider', 403],
     ['teacher', 'slider', 201],
-    ['teacher', 'popups', 403],
+    ['teacher', 'popups', 201],
+    ['student', 'popups', 201],
     ['admin', 'mediaHeads', 201],
   ])
     assert.equal(
@@ -323,4 +325,30 @@ test('security headers, cache controls, body bounds and environment-file isolati
     ).status,
     413,
   );
+});
+
+test('every staff role can publish an event but only Admin can edit or delete it', async () => {
+  for (const token of ['admin', 'teacher', 'student']) {
+    const created = await request('/api/popups', {
+      method: 'POST',
+      token,
+      body: {
+        title: `Event from ${token}`,
+        message: 'School news',
+        imageUrl: 'https://images.example/event.jpg',
+      },
+    });
+    assert.equal(created.status, 201);
+    const id = created.body.id;
+    const changed = await request(`/api/popups/${id}`, {
+      method: 'PATCH',
+      token,
+      body: { title: 'Updated event', message: 'Updated news' },
+    });
+    assert.equal(changed.status, token === 'admin' ? 200 : 403, JSON.stringify(changed.body));
+    assert.equal(
+      (await request(`/api/popups/${id}`, { method: 'DELETE', token: 'admin' })).status,
+      204,
+    );
+  }
 });
