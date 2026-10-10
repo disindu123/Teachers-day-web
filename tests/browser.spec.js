@@ -29,6 +29,17 @@ async function staffFixture(page, role) {
     }),
   );
 }
+async function capturePage(page, path) {
+  for (const section of await page.locator('.motion-ready').all()) {
+    await section.scrollIntoViewIfNeeded();
+    await expect(section).toHaveCSS('opacity', '1');
+  }
+  await page.evaluate(() => {
+    document.activeElement?.blur();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  });
+  await page.screenshot({ path, fullPage: true });
+}
 let scenarioIp = 10;
 test.beforeEach(async ({ page }) => {
   await page.setExtraHTTPHeaders({ 'X-Forwarded-For': `192.0.2.${scenarioIp++}` });
@@ -57,14 +68,14 @@ test('desktop home retains Sinhala/gold design, six slides, events, live and boa
   await expect(page.locator('#slide-count')).toHaveText('02 / 06');
   await page.getByRole('button', { name: 'Pause slideshow' }).click();
   await expect(page.getByRole('button', { name: 'Play slideshow' })).toBeVisible();
-  await expect(page.locator('#event-date')).toContainText('8:00');
-  await expect(page.locator('#event-date')).toContainText('Sri Lanka time');
+  await expect(page.locator('#event-title')).toHaveText('SCMU special event');
+  await expect(page.locator('#event-date')).toBeHidden();
   await expect(page.locator('#live-section iframe')).toBeVisible();
   await expect(page.locator('.board-card')).toHaveCount(1);
   await page.getByRole('button', { name: 'Event notifications' }).click();
   await expect(page.getByRole('dialog', { name: 'Events & notifications' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.screenshot({ path: 'test-results/home-desktop.png', fullPage: true });
+  await capturePage(page, 'test-results/home-desktop.png');
   expect(errors).toEqual([]);
 });
 test('mobile navigation, layout and two-field feedback work', async ({ page }) => {
@@ -86,7 +97,7 @@ test('mobile navigation, layout and two-field feedback work', async ({ page }) =
     document.activeElement?.blur();
     window.scrollTo(0, 0);
   });
-  await page.screenshot({ path: 'test-results/contact-mobile.png', fullPage: true });
+  await capturePage(page, 'test-results/contact-mobile.png');
 });
 test('gallery groups exact albums and opens a keyboard lightbox with inert captions', async ({
   page,
@@ -108,8 +119,8 @@ test('gallery groups exact albums and opens a keyboard lightbox with inert capti
 });
 for (const [role, count] of [
   ['admin', 9],
-  ['teacher', 3],
-  ['student', 1],
+  ['teacher', 4],
+  ['student', 2],
 ])
   test(`${role} dashboard shows only permitted tools and private gallery metadata`, async ({
     page,
@@ -224,4 +235,52 @@ test('Admin account/event/IP forms and maintenance/live controls save and remove
   await expect(page.locator('#settings-form .form-status')).toContainText('Saved successfully');
   expect((await page.request.get('/')).status()).toBe(200);
   expect(errors).toEqual([]);
+});
+
+for (const role of ['teacher', 'student'])
+  test(`${role} publishes a special-event image from the dashboard`, async ({ page }) => {
+    await staffFixture(page, role);
+    await page.goto('/admin/index.html');
+    await page.getByRole('tab', { name: 'Events', exact: true }).click();
+    await expect(page.locator('#popup-list')).not.toContainText('Edit text');
+    await expect(page.locator('#popup-list')).not.toContainText('Remove event');
+    const title = `Special event by ${role}`;
+    await page.getByLabel('Event title', { exact: true }).fill(title);
+    await page.locator('#popups-form textarea').fill('Published by our media team.');
+    await page.locator('#popup-file').setInputFiles({
+      name: 'event.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    });
+    await page.getByRole('button', { name: 'Publish event', exact: true }).click();
+    await expect(page.locator('#popup-list')).toContainText(title);
+    await page.goto('/');
+    await expect(page.locator('#event-title')).toHaveText(title);
+    await expect(page.locator('.featured-event-image')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: title })).toBeVisible();
+  });
+test('navigation underline follows hover and focus; reduced motion keeps sections visible', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Got it', exact: true }).click();
+  const underline = page.locator('.nav-indicator');
+  const home = await underline.evaluate((node) => getComputedStyle(node).transform);
+  await page.locator('#navigation a[href="/gallery"]').hover();
+  await expect
+    .poll(() => underline.evaluate((node) => getComputedStyle(node).transform))
+    .not.toBe(home);
+  await page.locator('#navigation a[href="/contact"]').focus();
+  await expect(underline).toBeVisible();
+  expect(await underline.evaluate((node) => getComputedStyle(node).transitionDuration)).toBe('0s');
+  expect(
+    await page.locator('.special-event').evaluate((node) => getComputedStyle(node).opacity),
+  ).toBe('1');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Open menu', exact: true }).click();
+  await expect(page.locator('#navigation')).toBeVisible();
+  expect(
+    await page.locator('#navigation').evaluate((node) => getComputedStyle(node).position),
+  ).toBe('absolute');
 });

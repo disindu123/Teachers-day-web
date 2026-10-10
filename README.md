@@ -14,15 +14,16 @@ The official SCMU website built on the original Teacher’s Day white, gold and 
 
 ## Roles
 
-| Capability                                                  | Admin | Teacher | Student |
-| ----------------------------------------------------------- | ----- | ------- | ------- |
-| Add gallery photographs or image URLs                       | Yes   | Yes     | Yes     |
-| View gallery uploader and time                              | Yes   | Yes     | No      |
-| Add slider photographs or URLs                              | Yes   | Yes     | No      |
-| View private feedback                                       | Yes   | Yes     | No      |
-| Delete feedback or photographs; edit captions/order/albums  | Yes   | No      | No      |
-| Create/edit/delete/disable accounts; change roles/passwords | Yes   | No      | No      |
-| Manage board, events, live, maintenance and IP blocks       | Yes   | No      | No      |
+| Capability                                                        | Admin | Teacher | Student |
+| ----------------------------------------------------------------- | ----- | ------- | ------- |
+| Add gallery photographs or image URLs                             | Yes   | Yes     | Yes     |
+| View gallery uploader and time                                    | Yes   | Yes     | No      |
+| Add slider photographs or URLs                                    | Yes   | Yes     | No      |
+| View private feedback                                             | Yes   | Yes     | No      |
+| Delete feedback or photographs; edit captions/order/albums        | Yes   | No      | No      |
+| Create/edit/delete/disable accounts; change roles/passwords       | Yes   | No      | No      |
+| Publish events with an optional photo                             | Yes   | Yes     | Yes     |
+| Manage board, edit/delete events, live, maintenance and IP blocks | Yes   | No      | No      |
 
 **Specification assumption:** Teachers can read feedback as requested in the role description. `GET /api/messages` permits Admin and Teacher; deletion is Admin-only. Students can add gallery images but cannot change the homepage slider. Roles are lowercase in Firestore. “Gmail login” means an SCMU Firebase Email/Password account using a Gmail address, with a separate SCMU password; the site does not request a Google account password.
 
@@ -83,7 +84,7 @@ It is a trusted operator tool, not a public endpoint. The dashboard prevents sel
 2. Add gallery photos by **file or HTTPS URL**, with an optional caption, album title and exact Facebook album link. Uploads accept JPEG/PNG/WebP/GIF up to 10 MB. SVG files are deliberately excluded.
 3. Add **5–7 homepage slides**, with order numbers. The supplied local education photos are clearly marked as illustrative until replaced; they are not representations of real SCMU events. Optional `npm run seed:slider` copies the six illustrative photos into your Storage bucket and Firestore only if the slider is empty.
 4. Fill `SOCIAL_FACEBOOK`, `SOCIAL_TIKTOK` and `SOCIAL_INSTAGRAM` in the host environment. Unknown links are disabled, rather than guessed. The supplied YouTube channel is already set. Confirm `SCHOOL_WEBSITE` and replace the existing landscape `public/assets/scmu-logo.svg` with the approved logo or set `LOGO_URL`.
-5. Publish event notices and live broadcasts only when ready. A new event ID is shown once on that browser; cleared local storage or another device can show it again. The Teacher’s Day section date is configurable through `EVENT_DATE`; the default is `2026-10-06T08:00:00+05:30`, and displayed timestamps use `Asia/Colombo`.
+5. Publish event notices and live broadcasts only when ready. All staff roles can publish events with an image upload or URL. The newest event replaces the homepage special-event content; only Admins can edit or delete notices. A new event ID is shown once on that browser; cleared local storage or another device can show it again. When no notices exist, the fallback Teacher’s Day section date is configurable through `EVENT_DATE`; the default is `2026-10-06T08:00:00+05:30`, and displayed timestamps use `Asia/Colombo`.
 
 Photos provided by URL remain on their original host; file uploads use Firebase Storage. Deleting a URL-based post does not delete the original external file. Each published upload keeps its owned `storagePath`; only owned uploads can be removed. Existing Cloudinary URLs remain usable as external URLs, but this version has no Cloudinary dependency or credentials.
 
@@ -169,7 +170,7 @@ Send JSON for writes. Staff requests need `Authorization: Bearer <Firebase ID to
 | `POST /api/uploads/ticket`                                      | Role-appropriate staff requests `{collection, contentType, size}` before SDK Storage upload    |
 | `GET/POST /api/accounts`                                        | Admin lists/creates `{email,password,displayName?,role}`                                       |
 | `PATCH/DELETE /api/accounts/:uid`                               | Admin edits email/name/password/role/disabled or deletes                                       |
-| `GET/POST /api/popups`                                          | Public read; Admin creates `{title,message,ticketId OR imageUrl?}`                             |
+| `GET/POST /api/popups`                                          | Public read; all staff roles create `{title,message,ticketId OR imageUrl?}`                    |
 | `PATCH/DELETE /api/popups/:id`                                  | Admin edits text or deletes event                                                              |
 | `GET/PUT /api/live`                                             | Public read; Admin sets `{platform,url,isLive}`                                                |
 | `GET/PUT /api/settings`                                         | Public maintenance status; Admin sets `{maintenanceMode}`                                      |
@@ -205,3 +206,5 @@ npm run test:browser
 API/unit tests inject test-only services and cover role restrictions, privacy, validation, account changes, upload ownership, maintenance and IP blocking. Rules tests run against the **demo-scmu** Firestore/Storage emulators and test both allowed and denied requests plus real Firestore transactions. The bundled Firebase CLI 14 requires a compatible JDK (JDK 17 works for these emulators). Browser tests use an injected Firebase SDK fixture solely in test code and cover mobile/desktop UI and role dashboards. Tests never log into a real project or publish live content.
 
 Before a public launch, verify actual credentials, Storage/Firestore IAM/rules, Firebase Auth and the host’s forwarded IP behavior on a staging deployment. The source is deployment-ready, but no live Firebase project is configured by these files.
+
+Navigation uses a moving underline for hover and keyboard focus. Subtle scroll, button, card and dialog transitions respect `prefers-reduced-motion`; content stays visible without JavaScript.

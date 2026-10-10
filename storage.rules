@@ -7,8 +7,8 @@ service firebase.storage {
     function permitted(section) {
       return request.auth != null && profile().disabled == false &&
         (profile().role == 'admin' ||
-         profile().role == 'teacher' && section in ['gallery', 'slider'] ||
-         profile().role == 'student' && section == 'gallery');
+         profile().role == 'teacher' && section in ['gallery', 'slider', 'popups'] ||
+         profile().role == 'student' && section in ['gallery', 'popups']);
     }
     // Browsers upload only into a server-issued, expiring, single-use permit.
     // Publishing, download-token generation and deletion are server operations.
